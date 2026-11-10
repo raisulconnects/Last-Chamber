@@ -30,4 +30,4 @@ Real-time play with other humans. The simulation is already driven by `Command`s
 - Custom domain for the deployed game
 
 ## Done
-- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, GitHub Pages deployment
+- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support
