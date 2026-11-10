@@ -17,37 +17,65 @@ Real-time play with other humans. The simulation is already driven by `Command`s
 
 ### Stats and progress (done in 0.5.0)
 - Local win / loss / draw record, streaks, per-mode stats and recent matches (localStorage), Stats screen in the menu
-- Next on this track: achievements and the currency system below
 
-### In-game currency and progression (planned, builds on stats)
-Goal: a satisfying grind loop even in single player. Local-only storage for now (migrate to server validation with online multiplayer, since local data is easy to edit).
+### In-game currency, shop and player profile (designed, not built yet)
+Goal: a satisfying grind loop even in single player. Local-only storage for now (server-side validation comes with online multiplayer, since local data is easy to edit). All modes stay free. Each build phase below gets its own plan before coding.
 
-**Currency:** "Shells" (soft currency, matches the revolver theme). Optional second, earn-only currency later for rare items.
+**Currency:** **Shells** (revolver theme). One soft currency, earned only by playing; no real-money purchases.
 
-**Earning**
-- Per match: base for playing, bonus for a win, kills and rounds survived, multiplied by mode difficulty (bot difficulty, bot count, mode)
-- Player level / XP from every match; level-ups pay Shells and unlock items; free reward track with a visible progress bar
-- Daily login streak (gentle reset with a one-day grace), 3 rotating daily challenges, a weekly challenge
-- Milestones and achievements (first win, 10 / 50 / 100 wins, streaks, flawless win, clutch win), each paying Shells and a badge
+#### Earning Shells from matches
+`payout = round((play + win/draw + kills + roundsSurvived) x modeMult x difficultyMult x botMult)`
+- Base: play **10**, win **+20**, draw **+8**, each kill **+8**, each round survived **+2**
+- Difficulty: Easy x0.8, Normal x1.0, Hard x1.3
+- Bots: `clamp(1 + 0.1 x (bots - 2), 0.8, 1.5)`
+- Mode: Classic x1.0, Quick Draw x0.8, Crowded Arena x1.2, Tight Circle x1.1, Marathon x1.5, Custom x0.5
+- Anti-farm: a match ending in round 1 pays a flat 5, no payout for a restart within 3 seconds, per-match cap 150
+- Pace in Classic / Normal: a loss pays about 24, a win about 58, so roughly 35 per 3-minute match. A cheap item takes ~2 matches, an evening (~10 matches) is about 350 Shells
+- Paid once per match at the same point stats are recorded, and stored as `earned` on the match record
 
-**Spending**
-1. Cosmetics (no gameplay effect): character colors and skins, gun styles, muzzle flash and tracer colors, kill effects, arena floor themes, menu and cylinder themes
-2. Titles and badges shown on the Stats screen (and later in multiplayer)
-3. Unlockable modes: Quick Draw, Crowded Arena, Tight Circle, Marathon by level or Shells. Classic and Custom always stay free
-4. Gameplay power-ups: consumables for casual single player only, one per match, never in online or ranked play. Ideas: Second Wind (survive one boundary death), Longer Reveal Window, Steady Aim (touch aim assist), Ghost Step (short speed boost)
-5. Cylinder crates: Shell-priced cosmetic crates with a visible odds table (no paid loot boxes)
+#### Shop catalog v1 (all cosmetic, zero gameplay effect)
+Price bands: Common 80-150, Rare 350-600, Epic 900-1500, Legendary 2500-3500. Starter items are free so the Locker is never empty.
 
-**Stickiness ideas**
-- Collection screen with completion percentages, NEW tags, rarity tiers (common / rare / epic / legendary) with distinct frames
-- "12 Shells to your next unlock" on the game-over panel and an animated reward counter after each match
-- Daily shop rotation, seasonal themes, prestige levels with gold frames
-- Named bot rivals with a head-to-head record, personal-best boards, a shareable result card (friend leaderboards once online exists)
+| Category | Free | Common | Rare | Epic | Legendary |
+| --- | --- | --- | --- | --- | --- |
+| **Character skins** (your character only; bots keep their colors) | Cyan | Mint 100, Rose 100, Slate 100 | Two-tone Stripes 350, Neon Lime 400 | Gold Trim 900 | Phantom (soft glow) 2500, Chrome 3000 |
+| **Shot style** (tracer + muzzle flash) | Amber | Lime 80, Pink 80, Ice 100 | Rainbow Shift 400 | Plasma Pulse 1000 | Comet Trail 2500 |
+| **Kill effects** (plays at your kill during the reveal) | Plain | Spark Burst 150 | Ring Pulse 400 | Confetti Pop 900 | Lightning Strike 2500 |
+| **Arena themes** (floor tint + ring colors) | Concrete | Midnight Blue 150, Sandstone 150 | Lava Ring 500, Frost 500 | Neon Grid 1200 | Void 3000 |
+| **Titles** | Rookie | Sharpshooter 120 | Dead Eye 300 | Ghost 600 | Last Chamber 2000 |
 
-**Guardrails:** no real-money purchases for now (needs backend, payments and legal work), no timers that punish absence, odds always shown.
+Badges are not sold; they are earned from achievements and shown beside the title.
 
-**Technical shape:** `src/progress.ts` (wallet, XP, unlocks, inventory, daily state), data-driven `src/shop.ts` catalog, cosmetic hooks in `characters.ts` / `effects.ts` / `theme.ts`, versioned localStorage with the same sanitize/load pattern as `stats.ts`.
+#### Player profile
+A Profile screen in the main menu is the player's identity and progress hub:
+- Header card: editable name (default "Player", max 14 chars), equipped title and badges, level with XP bar, Shell balance, member-since date
+- Level frames: bronze 1-9, silver 10-24, gold 25-49, diamond 50+
+- Achievements tab: all achievements with progress bars, locked / unlocked state, reward and badge, "NEW" marker; up to 3 pinned badges
+- Stats link (headline numbers plus a button to the Stats screen) and a loadout summary (skin, shot style, kill effect, arena theme)
+- Also shown as a compact profile chip on the main menu; the game-over panel shows XP gained and level-ups; online, name / title / badge are what other players see
 
-**Suggested order:** XP and levels -> Shells and cosmetic shop -> daily rewards and challenges -> mode unlocks and power-ups -> server-side validation with online multiplayer.
+#### Progression systems
+- **Level and XP:** XP = the match's base Shells (before multipliers). Level n needs `100 + 40n` XP; a level-up pays `25 + 5n` Shells
+- **Achievements** (Shells + badge): First Win 30, 10 Wins 100, 50 Wins 300, 100 Wins 600, 3-win streak 50, 5-win streak 120, Flawless Win 80, 25 Kills 100, Survive 10 Rounds 100, Play every mode 150
+- **Daily login streak:** days 1-7 pay 20, 30, 40, 50, 60, 80, 120, then loop; one missed day keeps the streak, two reset it (device date)
+- **Daily challenges:** 3 a day from a pool (get 2 kills, win a Quick Draw, survive 6 rounds, play 3 matches, win on Hard...), seeded by date, 40-80 Shells each, plus a weekly challenge for 200
+
+#### UI plan
+- Main menu: **Shop** (Buy and Equip, category tabs, rarity-colored frames, live preview, Buy / Equip / Equipped states, "need N more Shells"), **Profile**, wallet chip, level bar
+- Touch-friendly like Stats (48 px targets, drag to scroll, portrait and landscape)
+- Game-over panel: "+47 Shells" with a one-line breakdown, an animated counter and "N Shells to your next unlock"
+- Equipped cosmetics only change how the human is drawn, never match state; during the hidden phase only your own character is still drawn
+
+#### Technical shape
+`src/economy.ts` (pure `calcPayout`, mode table, anti-farm rules), `src/shop.ts` (data-driven catalog, pure `buy` / `equip`), `src/progress.ts` (versioned localStorage `last-chamber-progress`: shells, owned, equipped, name, later xp / level / achievements / daily state; same sanitize pattern as `stats.ts`), `src/cosmetics.ts` (equipped ids to render parameters, hooked into `characters.ts`, `effects.ts`, `arena.ts` / `theme.ts`), new `shop` and `profile` menu screens reusing the Stats panel and scroll patterns.
+
+#### Build phases
+1. **0.6.0 Shells, Shop and Profile:** wallet, payout, game-over payout panel, Shop and Locker with all five categories, Profile screen (name, title, loadout, stats link)
+2. **0.7.0 Level / XP and achievements:** level bar and frames, level-up rewards, achievements tab and badges
+3. **0.8.0 Dailies:** login streak and daily / weekly challenges
+4. **Later:** daily shop rotation, cylinder crates with visible odds (cosmetics only), casual-only power-ups, prestige levels, named bot rivals, share card, server-side validation with online multiplayer
+
+**Guardrails:** no real-money purchases for now, no timers that punish absence, odds always shown, modes never locked.
 
 ### Power-ups and new mechanics (changes gameplay)
 - Pickups, obstacles, alternative weapons or arena shapes
