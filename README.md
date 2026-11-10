@@ -1,67 +1,143 @@
-# Last Chamber (browser prototype)
+<div align="center">
 
-Formerly "Hidden Shootout". Top-down elimination game: one human vs two bots in a circular arena. During a timed hidden phase you move and aim but cannot see opponents. At zero, everyone is revealed and fires one instant shot simultaneously. The safe circle shrinks every round; last survivor wins.
+# Last Chamber
 
-## Setup / run / test
-```
-npm install
-npm run dev      # start the dev server (open the printed URL)
-npm test         # run the unit tests (Vitest)
-npm run build    # typecheck + production build
-```
-Requires Node 18+.
+**One shot. No warning.**
 
-> `package.json` overrides `rollup` with `@rollup/wasm-node`. This avoids the native Rollup binary, which some locked-down Windows machines (Application Control policies) refuse to load. Remove the `overrides` block if you don't need it.
+A fast, top-down elimination game for the browser. Move blind, aim blind, and trust your read of the arena. When the timer hits zero everyone is revealed and fires at once.
 
-## Menu and modes
-Play > Single Player offers **Classic** (the original rules), **Quick Draw**, **Crowded Arena**, **Tight Circle**, **Marathon**, and **Custom** (1-5 bots, hidden/reveal time, shrink speed, minimum circle, max rounds, bot difficulty; saved between sessions). Multiplayer shows "Coming soon". The menu also has How to Play, Settings (volume, sound, reduce flashing), Credits and a Changelog.
+![Version](https://img.shields.io/badge/version-0.4.0-4cc9f0)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/built%20with-Vite-646cff?logo=vite&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-Vitest-6e9f18?logo=vitest&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-desktop%20%7C%20mobile-lightgrey)
 
-Credits are set in `src/credits.ts` (name; optional role and links).
+<img src="docs/screenshots/menu.png" alt="Last Chamber main menu" width="720">
 
-## Versioning
-Add an entry to `CHANGELOG.md` (shown in-game) and bump `version` in `package.json` for each release.
+</div>
+
+---
+
+## Table of contents
+- [How it plays](#how-it-plays)
+- [Screenshots](#screenshots)
+- [Game modes](#game-modes)
+- [Controls](#controls)
+- [Getting started](#getting-started)
+- [Project structure](#project-structure)
+- [Design notes](#design-notes)
+- [Testing](#testing)
+- [Roadmap](#roadmap)
+- [Credits and license](#credits-and-license)
+
+## How it plays
+1. **Hidden phase.** Every round you have a few seconds to move and aim. Opponents are invisible, and so are you to them.
+2. **Reveal.** At zero, all players are shown and each fires one instant shot at the nearest target in front of them. Shots resolve simultaneously, so mutual kills happen.
+3. **The circle shrinks.** Stand outside the safe circle when the round resolves and you are eliminated too.
+4. **Last survivor wins.** If nobody is left standing, the round is a draw.
+
+There is no fire button. The skill is positioning, aiming and predicting where others will be.
+
+## Screenshots
+
+| Hidden phase | Reveal |
+| :---: | :---: |
+| <img src="docs/screenshots/hidden.png" alt="Hidden phase" width="380"> | <img src="docs/screenshots/reveal.png" alt="Reveal" width="380"> |
+
+| Custom match | Mobile (portrait) | Mobile (landscape) |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/custom.png" alt="Custom match screen" width="300"> | <img src="docs/screenshots/mobile-portrait.png" alt="Mobile portrait" width="150"> | <img src="docs/screenshots/mobile-landscape.png" alt="Mobile landscape" width="300"> |
+
+## Game modes
+Play > Single Player offers:
+
+| Mode | What changes |
+| --- | --- |
+| **Classic** | The original rules: 1 vs 2 bots, 6 s hidden phase |
+| **Quick Draw** | 3 s rounds and a faster shrink |
+| **Crowded Arena** | 1 vs 4 bots, expect chain kills |
+| **Tight Circle** | The safe circle shrinks hard every round |
+| **Marathon** | 10 s rounds, gentle shrink, 30 rounds |
+| **Custom** | 1-5 bots, hidden and reveal time, shrink speed, minimum circle, max rounds, bot difficulty (saved between sessions) |
+
+Multiplayer is shown as "coming soon". The menu also includes How to Play, Settings (volume, sound, reduce flashing), Credits and an in-game Changelog.
 
 ## Controls
-- **WASD / Arrow keys**: move (diagonals are normalized)
-- **Mouse**: aim (no fire button; the shot fires automatically at the deadline)
-- **Touch (phones/tablets)**: left stick moves, right stick aims; tap MENU twice to quit; Full button for fullscreen. Portrait and landscape both work.
-- **Menu:** Up/Down (W/S) select, Left/Right (A/D) adjust, Enter confirm, Esc back, or use the mouse.
-- **In a match:** **R** restarts with the same mode, **Esc** returns to the menu. On the game-over screen use Enter / R to restart.
-- **M** or the Sound button: mute. The slider sets master volume (both are remembered in `localStorage`).
 
-## Architecture (`src/`)
-| File | Role |
+| Input | Action |
 | --- | --- |
-| `config.ts` | All tuning values (hidden/reveal time, radii, speed, shrink factor, bot tuning) |
-| `types.ts` | Shared types (`Player`, `Command`, `SnapshotPlayer`, `ResolutionResult`, ...) |
-| `geometry.ts` | Ray-circle entry, safe-circle test, arena clamping |
-| `resolve.ts` | Pure simultaneous resolution: snapshot in, shots/deaths out. Order-independent |
-| `movement.ts` | Applies a `Command` to a player (same rules for human and bots) |
-| `match.ts` | State machine READY / HIDDEN / RESOLVE / REVEAL / GAME_OVER; fixed-step `update(dt, commands)` |
-| `bot.ts` | Bot decisions; only knows positions revealed in earlier rounds; outputs `Command`s |
-| `input.ts`, `view.ts` | Keyboard/mouse and world <-> screen transform (resize-safe) |
-| `render.ts`, `main.ts` | Canvas drawing/HUD/screens, game loop with fixed timestep |
-| `settings.ts` | Match settings, mode presets, Custom limits/clamping, bot difficulty profiles, saved preferences |
-| `menu/menuModel.ts`, `menu/menuView.ts` | Pure menu navigation state machine; canvas menu screens and mouse hit regions |
-| `changelog.ts`, `version.ts`, `credits.ts` | Changelog parser (reads `CHANGELOG.md`), app name/version, editable credits |
-| `theme.ts` | Central visual + audio settings and asset references (no gameplay values) |
-| `characters.ts`, `arena.ts`, `effects.ts` | Procedural top-down characters, textured arena and shrink animation, reveal effects built only from the computed `ResolutionResult` |
-| `events.ts`, `audio.ts` | Once-only game events from match state; synthesized Web Audio sounds, mute/volume, volley loudness limiting |
+| **WASD / arrow keys** | Move |
+| **Mouse** | Aim |
+| **Touch: left stick** | Move |
+| **Touch: right stick** | Aim (the gun keeps its direction when you let go) |
+| **R** | Restart with the same mode |
+| **Esc** (or **MENU** twice on touch) | Back to the menu |
+| **M** / Sound button | Mute |
 
-Visuals and audio are presentation only: they read match state but never change it. During HIDDEN only your own character is drawn (no opponents, shadows, particles, trails or remnants), and there are no positional or opponent-movement sounds. Reveal effects are discarded before the next hidden phase. See `CREDITS.md` for assets and placeholders.
+Menus: Up/Down select, Left/Right adjust, Enter confirm, Esc back, or use mouse/touch. Phones and tablets work in portrait and landscape, with a fullscreen button where the browser supports it.
 
-The simulation (`match`, `resolve`, `geometry`, `movement`, `bot`) has no DOM dependency. Everything that drives a player is a `Command`, so local input and bots could later be replaced by server-authoritative commands.
+## Getting started
 
-Deadline logic runs on simulation time: the last HIDDEN step is clipped to the deadline, the snapshot is taken, and resolution runs exactly once (`resolutionCount`). The loop pauses while the tab is hidden and resets its timing on resume, so no catch-up step happens.
+Requires **Node 18+**.
 
-Opponents are drawn only in REVEAL/GAME_OVER; the hidden phase renders just your own player and the arena.
+```bash
+npm install
+npm run dev      # start the dev server and open the printed URL
+npm test         # run the unit tests
+npm run build    # typecheck + production build into dist/
+npm run preview  # serve the production build locally
+```
 
-## Prototype defaults used (see `src/config.ts`)
-- Classic mode: 1 human + 2 bots; hidden 6 s, reveal 1.5 s; arena radius 320; player radius 12; speed 130/s
-- Safe radius x0.85 per round, minimum 50, max 20 rounds (round limit with several survivors = draw)
-- Survivors keep position and aim between rounds; no collisions between players; one hit kills
-- Zero survivors = draw. Players outside the safe circle still fire; boundary and shot deaths apply together
-- No networking; mobile is verified by emulation only, not on real devices
+> `package.json` overrides `rollup` with `@rollup/wasm-node`. This avoids the native Rollup binary, which some locked-down Windows machines (Application Control policies) refuse to load. Remove the `overrides` block if you do not need it.
 
-## Tests
-`npm test` covers ray misses, off-center hits, nearest-target, mutual kills, chain kills, blocking by a doomed target, array-order independence, safe-circle inside/touching/outside, outside-circle shooters, draw/win outcomes, single resolution after the deadline, frozen state post-deadline, round-limit draw, restart clearing, and basic bot behavior.
+## Project structure
+
+```
+src/
+  config.ts  settings.ts  types.ts        tuning values, match presets, shared types
+  geometry.ts  resolve.ts  movement.ts    pure simulation rules
+  match.ts  bot.ts                        state machine and bot AI
+  input.ts  touch.ts  ui.ts  view.ts      keyboard, mouse, touch sticks, screen transform
+  render.ts  arena.ts  characters.ts  effects.ts   canvas drawing
+  events.ts  audio.ts                     once-only events, synthesized Web Audio
+  menu/menuModel.ts  menu/menuView.ts     menu state machine and canvas menu
+  changelog.ts  version.ts  credits.ts    in-game changelog, version, credits
+  theme.ts                                visual and audio settings
+tests/                                    Vitest suites
+```
+
+| Module | Role |
+| --- | --- |
+| `resolve.ts` | Pure simultaneous resolution: snapshot in, shots and deaths out. Independent of player order |
+| `match.ts` | State machine READY / HIDDEN / RESOLVE / REVEAL / GAME_OVER with a fixed-step `update(dt, commands)` |
+| `bot.ts` | Bots only know positions revealed in earlier rounds and output the same `Command`s as a human |
+| `settings.ts` | Mode presets, Custom limits and clamping, bot difficulty profiles, saved preferences |
+| `touch.ts` | Floating dual virtual sticks built on Pointer Events |
+
+## Design notes
+- **Simulation is separate from presentation.** `match`, `resolve`, `geometry`, `movement` and `bot` have no DOM dependency. Visuals and audio read match state and never change it.
+- **Everything that drives a player is a `Command`.** Local input and bots could later be replaced by server-authoritative commands for multiplayer.
+- **Fixed timestep (60 Hz).** The last hidden step is clipped to the deadline, the snapshot is taken, and resolution runs exactly once. The loop pauses while the tab is hidden and does not catch up on resume.
+- **Fair hidden phase.** Only your own character is drawn while hidden: no opponents, shadows, particles, trails or positional sounds.
+- **No audio files.** All sound is synthesized at runtime with Web Audio.
+
+### Default rules (Classic, see `src/config.ts`)
+- 1 human + 2 bots, hidden 6 s, reveal 1.5 s, arena radius 320, player radius 12, speed 130/s
+- Safe radius x0.85 per round, minimum 50, max 20 rounds (a round limit with several survivors is a draw)
+- Survivors keep position and aim between rounds, there are no collisions between players, and one hit kills
+- Players outside the safe circle still fire; boundary and shot deaths apply together
+
+## Testing
+`npm test` runs the Vitest suites covering ray misses and off-center hits, nearest-target selection, mutual and chain kills, array-order independence, safe-circle edge cases, draw and win outcomes, single resolution at the deadline, round-limit draws, restart, bot behavior, menu navigation, settings clamping, the changelog parser and touch-stick math.
+
+Mobile support has been verified with emulated touch in a headless browser, not yet on real devices.
+
+## Roadmap
+- Online multiplayer (the `Command` model is designed for it)
+- Real-device mobile testing (iOS Safari fullscreen, notches, haptics)
+- Logo and final art pass
+
+## Credits and license
+Created by **Raisul Islam**. Floor tiles are from Kenney's "Tiny City" pack (CC0). See [CREDITS.md](CREDITS.md) for all assets and [CHANGELOG.md](CHANGELOG.md) for release history.
+
+No license has been chosen yet; all rights reserved until one is added.
