@@ -1,5 +1,8 @@
 import { CLASSIC, PRESETS, cycleDifficulty, loadCustom, saveCustom, stepSetting } from '../settings';
 import type { MatchSettings } from '../settings';
+import { emptyProgress } from '../progress';
+import type { Progress } from '../progress';
+import { CATEGORIES, CONFIRM_FROM, buyOrEquip, isEquipped, isOwned, itemById, itemsIn } from '../shop';
 import { emptyStats } from '../stats';
 import type { StatsData } from '../stats';
 
@@ -11,6 +14,8 @@ export type Screen =
   | 'multiplayer'
   | 'howto'
   | 'stats'
+  | 'shop'
+  | 'profile'
   | 'settings'
   | 'credits'
   | 'changelog';
@@ -29,7 +34,9 @@ export type MenuAction =
   | { type: 'setVolume'; value: number }
   | { type: 'toggleMute' }
   | { type: 'setReduceFlashing'; value: boolean }
-  | { type: 'resetStats' };
+  | { type: 'resetStats' }
+  | { type: 'saveProgress' }
+  | { type: 'rename' };
 
 export interface MenuItem {
   id: string;
@@ -41,7 +48,7 @@ export interface MenuItem {
   primary?: boolean;
 }
 
-export type ClickPart = 'main' | 'dec' | 'inc';
+export type ClickPart = 'main' | 'dec' | 'inc' | 'tab';
 
 const NUM_KEYS = ['botCount', 'hiddenDuration', 'revealDuration', 'safeRadiusMultiplier', 'minSafeRadius', 'maxRounds'] as const;
 type NumKey = (typeof NUM_KEYS)[number];
@@ -60,6 +67,13 @@ export class MenuModel {
   stats: StatsData = emptyStats();
   /** True after the first tap on "Reset stats"; a second tap confirms. */
   resetArmed = false;
+  /** Wallet, inventory and loadout, owned and updated by the app (and by purchases here). */
+  progress: Progress = emptyProgress();
+  shopTab = 0;
+  /** An expensive item waiting for its confirming second tap. */
+  armedId: string | null = null;
+  /** Latest shop message; the view shows it briefly (seq changes on every new message). */
+  toast: { text: string; kind: 'good' | 'bad' | 'info'; seq: number } = { text: '', kind: 'info', seq: 0 };
   private stack: { screen: Screen; focus: number }[] = [];
 
   constructor(
@@ -76,8 +90,10 @@ export class MenuModel {
       case 'main':
         return [
           { id: 'play', label: 'Play', kind: 'button', primary: true },
-          { id: 'howto', label: 'How to Play', kind: 'button' },
+          { id: 'shop', label: 'Shop', kind: 'button' },
+          { id: 'profile', label: 'Profile', kind: 'button' },
           { id: 'stats', label: 'Stats', kind: 'button' },
+          { id: 'howto', label: 'How to Play', kind: 'button' },
           { id: 'settings', label: 'Settings', kind: 'button' },
           { id: 'credits', label: 'Credits', kind: 'button' },
           { id: 'changelog', label: 'Changelog', kind: 'button' },
@@ -130,6 +146,18 @@ export class MenuModel {
           { id: 'flash', label: 'Reduce flashing', kind: 'toggle', value: this.env.reduceFlashing ? 'ON' : 'OFF' },
           back,
         ];
+      case 'shop':
+        return [
+          ...itemsIn(CATEGORIES[this.shopTab].id).map((i): MenuItem => ({ id: `shop:${i.id}`, label: i.name, kind: 'button', hint: i.blurb })),
+          back,
+        ];
+      case 'profile':
+        return [
+          { id: 'rename', label: 'Change name', kind: 'button' },
+          { id: 'goShop', label: 'Open Shop', kind: 'button' },
+          { id: 'goStats', label: 'View Stats', kind: 'button' },
+          back,
+        ];
       case 'stats':
         return [
           { id: 'resetStats', label: this.resetArmed ? 'Tap again to confirm' : 'Reset stats', kind: 'button' },
@@ -153,6 +181,7 @@ export class MenuModel {
     this.scroll = 0;
     this.maxScroll = 0;
     this.resetArmed = false;
+    this.armedId = null;
     if (screen === 'howto') this.howtoPage = 0;
   }
 
@@ -165,6 +194,7 @@ export class MenuModel {
     const n = this.items().length;
     this.focus = (this.focus + dir + n) % n;
     this.resetArmed = false;
+    this.armedId = null;
   }
 
   /** Scroll a scrollable screen (wheel / touch drag). */
@@ -176,11 +206,62 @@ export class MenuModel {
     if (index >= 0 && index < this.items().length && index !== this.focus) {
       this.focus = index;
       this.resetArmed = false;
+      this.armedId = null;
     }
   }
 
-  /** Left/right: change a stepper/toggle value, or flip How to Play pages. */
+  private say(text: string, kind: 'good' | 'bad' | 'info'): void {
+    this.toast = { text, kind, seq: this.toast.seq + 1 };
+  }
+
+  /** Switch the shop category tab (keyboard left/right or a tap on a tab). */
+  setTab(index: number): void {
+    const n = CATEGORIES.length;
+    this.shopTab = ((index % n) + n) % n;
+    this.focus = 0;
+    this.scroll = 0;
+    this.armedId = null;
+  }
+
+  /** Buy / equip the shop item with this id. Expensive items need a confirming second tap. */
+  private shopActivate(id: string): MenuAction | null {
+    const item = itemById(id);
+    if (!item) return null;
+    const p = this.progress;
+    if (!isOwned(p, id) && item.price >= CONFIRM_FROM && p.shells >= item.price && this.armedId !== id) {
+      this.armedId = id;
+      this.say(`Tap again to buy ${item.name} for ${item.price}`, 'info');
+      return null;
+    }
+    this.armedId = null;
+    if (isEquipped(p, id)) {
+      this.say(`${item.name} is already equipped`, 'info');
+      return null;
+    }
+    const r = buyOrEquip(p, id);
+    if (r.kind === 'needMore') {
+      this.say(`Need ${r.missing} more Shells`, 'bad');
+      return null;
+    }
+    if (r.kind === 'bought') {
+      this.progress = r.progress;
+      this.say(`Bought and equipped ${item.name}`, 'good');
+      return { type: 'saveProgress' };
+    }
+    if (r.kind === 'equipped') {
+      this.progress = r.progress;
+      this.say(`Equipped ${item.name}`, 'good');
+      return { type: 'saveProgress' };
+    }
+    return null;
+  }
+
+  /** Left/right: change a stepper/toggle value, flip How to Play pages, or switch shop tabs. */
   adjust(dir: 1 | -1): MenuAction | null {
+    if (this.screen === 'shop') {
+      this.setTab(this.shopTab + dir);
+      return null;
+    }
     if (this.screen === 'howto') {
       this.howtoPage = Math.max(0, Math.min(HOWTO_PAGES - 1, this.howtoPage + dir));
       return null;
@@ -217,8 +298,18 @@ export class MenuModel {
         this.go('settings');
         return null;
       case 'stats':
+      case 'goStats':
         this.go('stats');
         return null;
+      case 'shop':
+      case 'goShop':
+        this.go('shop');
+        return null;
+      case 'profile':
+        this.go('profile');
+        return null;
+      case 'rename':
+        return { type: 'rename' };
       case 'resetStats':
         if (this.resetArmed) {
           this.resetArmed = false;
@@ -264,6 +355,7 @@ export class MenuModel {
       case 'flash':
         return this.adjust(1);
     }
+    if (it.id.startsWith('shop:')) return this.shopActivate(it.id.slice(5));
     if (it.id.startsWith('preset:')) {
       const p = PRESETS.find((x) => `preset:${x.id}` === it.id);
       if (p) return { type: 'start', settings: { ...p.settings }, modeName: p.name };
@@ -273,6 +365,10 @@ export class MenuModel {
 
   /** Mouse click on an item region (`dec`/`inc` are the arrow zones of steppers). */
   clickItem(index: number, part: ClickPart): MenuAction | null {
+    if (part === 'tab') {
+      this.setTab(index);
+      return null;
+    }
     this.hover(index);
     if (part === 'dec') return this.adjust(-1);
     if (part === 'inc') return this.adjust(1);
@@ -290,6 +386,7 @@ export class MenuModel {
     this.focus = prev.focus;
     this.scroll = 0;
     this.resetArmed = false;
+    this.armedId = null;
     return true;
   }
 

@@ -1,5 +1,6 @@
 import { CONFIG } from './config';
 import { THEME } from './theme';
+import type { SkinParams } from './shop';
 import type { Vec2 } from './types';
 import type { View } from './view';
 
@@ -28,6 +29,8 @@ export interface CharacterStyle {
   alpha?: number;
   /** 0..1 gun recoil kick (visual only). */
   recoil?: number;
+  /** Equipped cosmetic extras (trim, stripes, glow, chrome, ghost). Presentation only. */
+  skin?: SkinParams;
 }
 
 /**
@@ -66,8 +69,13 @@ export function drawCharacter(
   const bodyLight = st.dead ? '#6b7280' : shade(st.color, 0.28);
   const skin = st.dead ? '#8a8f98' : '#f1c9a5';
 
+  const sk = st.dead ? undefined : st.skin;
+  const time = st.time ?? 0;
+  const baseAlpha = (st.alpha ?? 1) * (sk?.ghost ? 0.74 + 0.1 * Math.sin(time * 3) : 1);
+  const glowBlur = sk?.glow ? R * (0.8 + 0.35 * Math.sin(time * 2.4)) : 0;
+
   ctx.save();
-  if (st.alpha !== undefined) ctx.globalAlpha = st.alpha;
+  ctx.globalAlpha = baseAlpha;
   ctx.translate(s.x, s.y);
   ctx.rotate(angle);
   ctx.lineJoin = 'round';
@@ -110,20 +118,44 @@ export function drawCharacter(
   }
 
   // Torso / shoulders (wide across the aim direction)
-  ctx.fillStyle = body;
-  ctx.strokeStyle = bodyDark;
-  ctx.lineWidth = Math.max(1.5, R * 0.1);
-  ctx.beginPath();
-  ctx.ellipse(-R * 0.05, 0, R * 0.62, R * (0.98 + breathe * 0.025), 0, 0, Math.PI * 2);
+  const torsoPath = (): void => {
+    ctx.beginPath();
+    ctx.ellipse(-R * 0.05, 0, R * 0.62, R * (0.98 + breathe * 0.025), 0, 0, Math.PI * 2);
+  };
+  if (sk?.chrome) {
+    const sweep = ((time * 0.6) % 1) * 2 - 0.5;
+    const g = ctx.createLinearGradient(-R * 0.7, -R, R * 0.7, R);
+    g.addColorStop(0, '#6c7786');
+    g.addColorStop(Math.max(0.02, Math.min(0.98, sweep * 0.5)), '#f7fafd');
+    g.addColorStop(Math.max(0.03, Math.min(0.99, sweep * 0.5 + 0.2)), '#9aa6b5');
+    g.addColorStop(1, '#e6edf6');
+    ctx.fillStyle = g;
+  } else ctx.fillStyle = body;
+  ctx.strokeStyle = sk?.trim ?? bodyDark;
+  ctx.lineWidth = Math.max(1.5, R * (sk?.trim ? 0.13 : 0.1));
+  if (glowBlur > 0) {
+    ctx.shadowColor = sk!.glow!;
+    ctx.shadowBlur = glowBlur;
+  }
+  torsoPath();
   ctx.fill();
   ctx.stroke();
+  ctx.shadowBlur = 0;
+  if (sk?.stripes) {
+    ctx.save();
+    torsoPath();
+    ctx.clip();
+    ctx.fillStyle = sk.stripes;
+    for (const side of [-1, 1]) ctx.fillRect(-R * 0.75, side * R * 0.4 - R * 0.09, R * 1.5, R * 0.18);
+    ctx.restore();
+  }
   // Chest highlight stripe
   ctx.fillStyle = bodyLight;
-  ctx.globalAlpha = (st.alpha ?? 1) * 0.55;
+  ctx.globalAlpha = baseAlpha * 0.55;
   ctx.beginPath();
   ctx.ellipse(R * 0.1, 0, R * 0.22, R * 0.62, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.globalAlpha = st.alpha ?? 1;
+  ctx.globalAlpha = baseAlpha;
 
   // Head with a cap (back half) so facing is obvious from above.
   ctx.fillStyle = skin;
@@ -131,7 +163,7 @@ export function drawCharacter(
   ctx.arc(R * 0.1, 0, R * 0.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = bodyLight;
+  ctx.fillStyle = sk?.trim ?? sk?.stripes ?? bodyLight;
   ctx.beginPath();
   ctx.arc(R * 0.05, 0, R * 0.5, Math.PI / 2, Math.PI * 1.5); // back half of the head
   ctx.closePath();

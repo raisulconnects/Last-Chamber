@@ -3,7 +3,9 @@ import { drawCharacter, drawHumanMarker, drawNameTag, drawShadow } from './chara
 import { CONFIG } from './config';
 import { MenuView } from './menu/menuView';
 import type { MenuModel } from './menu/menuModel';
-import { buildRevealEffects, drawEliminations, drawRevealEffects, recoilAt, revealElapsed } from './effects';
+import { DEFAULT_LOADOUT } from './cosmetics';
+import type { Loadout } from './cosmetics';
+import { KILL_FX_SECONDS, buildRevealEffects, drawEliminations, drawKillEffect, drawRevealEffects, recoilAt, revealElapsed } from './effects';
 import type { RevealEffects } from './effects';
 import type { Match } from './match';
 import { THEME } from './theme';
@@ -21,6 +23,15 @@ export interface Rect {
 
 const C = THEME.colors;
 
+/** Shells earned by the match that just ended, shown on the game-over panel. */
+export interface RewardInfo {
+  earned: number;
+  parts: { play: number; result: number; kills: number; rounds: number };
+  balance: number;
+  next: string | null;
+  at: number; // seconds (performance.now()/1000) when the game-over screen appeared
+}
+
 export class Renderer {
   /** Clickable buttons (screen px) for the current overlay. */
   buttons: { id: 'restart' | 'menu'; rect: Rect }[] = [];
@@ -33,6 +44,9 @@ export class Renderer {
   quitArmed = false;
   /** Optional highlight line on the game-over panel (e.g. win streak); presentation only. */
   gameOverNote: string | null = null;
+  /** Equipped cosmetics and the latest match reward; presentation only. */
+  loadout: Loadout = DEFAULT_LOADOUT;
+  reward: RewardInfo | null = null;
   private cardBottom = 0;
   /** Tappable MENU pill (touch only) in screen px. */
   menuPill: Rect | null = null;
@@ -76,6 +90,7 @@ export class Renderer {
     this.lastNow = now;
 
     this.updateEffects(match);
+    this.arena.setTheme(this.loadout.arena);
     this.arena.update(match.phase === 'READY' ? CONFIG.arenaRadius : match.safeRadius, now);
 
     // Background
@@ -107,6 +122,7 @@ export class Renderer {
   /** Draw the starting menu (no match is active). */
   drawMenu(model: MenuModel): void {
     this.lastNow = performance.now() / 1000;
+    this.arena.setTheme(this.loadout.arena);
     this.menu.draw(this.ctx, this.view, this.arena, model, this.lastNow, this.u);
   }
 
@@ -137,7 +153,8 @@ export class Renderer {
 
     drawShadow(ctx, view, human.pos);
     drawCharacter(ctx, view, human.pos, human.aim, {
-      color: human.color,
+      color: this.loadout.skin.color ?? human.color,
+      skin: this.loadout.skin,
       name: human.name,
       isHuman: true,
       walkPhase: this.walkPhase,
@@ -160,7 +177,8 @@ export class Renderer {
     for (const sp of match.snapshot) {
       const p = byId.get(sp.id)!;
       drawCharacter(ctx, view, sp.pos, sp.aim, {
-        color: p.color,
+        color: p.isHuman ? (this.loadout.skin.color ?? p.color) : p.color,
+        skin: p.isHuman ? this.loadout.skin : undefined,
         name: p.name,
         isHuman: p.isHuman,
         dead: dead.has(sp.id) && t > 0.12, // goes grey just after the flash
@@ -170,8 +188,23 @@ export class Renderer {
       if (p.isHuman) drawHumanMarker(ctx, view, sp.pos, now);
       drawNameTag(ctx, view, sp.pos, p.isHuman ? 'YOU' : p.name, p.isHuman ? '#ffffff' : p.color);
     }
-    drawRevealEffects(ctx, view, fx, t, (id) => byId.get(id)?.color ?? '#fff');
+    const humanId = match.humanId;
+    drawRevealEffects(ctx, view, fx, t, (id) => byId.get(id)?.color ?? '#fff', { id: humanId, shot: this.loadout.shot });
     drawEliminations(ctx, view, fx, t);
+    // Equipped kill effect, only where the human's own shot eliminated someone.
+    const kind = this.loadout.kill;
+    if (kind && t < KILL_FX_SECONDS) {
+      const R = CONFIG.playerRadius * view.scale * THEME.art.characterScale;
+      const done = new Set<number>();
+      for (const sh of fx.shots) {
+        if (sh.shooterId !== humanId || sh.targetId === null || done.has(sh.targetId)) continue;
+        const e = fx.eliminations.find((x) => x.id === sh.targetId && x.reason !== 'boundary');
+        if (!e) continue;
+        done.add(sh.targetId);
+        const sp = view.toScreen(e.pos);
+        drawKillEffect(ctx, kind, sp.x, sp.y, R, t);
+      }
+    }
   }
 
   /** Distinct hidden (cool) vs reveal (warm) framing, plus a quick flash when the reveal fires. */
@@ -407,7 +440,7 @@ export class Renderer {
   }
 
   private panel(
-    lines: { text: string; font: string; color: string; gap: number }[],
+    lines: { text: string; font: string; color: string; gap: number; glow?: string }[],
     buttonDefs: { id: 'restart' | 'menu'; label: string; primary: boolean }[],
     accent: string,
     layout: 'center' | 'beside' | 'below' = 'center',
@@ -447,7 +480,12 @@ export class Renderer {
       y += l.gap * u;
       ctx.font = l.font;
       ctx.fillStyle = l.color;
+      if (l.glow) {
+        ctx.shadowColor = l.glow;
+        ctx.shadowBlur = 14 * u;
+      }
       ctx.fillText(l.text, cx, y);
+      ctx.shadowBlur = 0;
     }
 
     // Buttons: side by side normally, stacked when the panel is narrow.
@@ -494,12 +532,26 @@ export class Renderer {
     const sideFree = this.view.cssWidth / 2 - CONFIG.arenaRadius * this.view.scale;
     const belowFree = this.view.cssHeight / 2 - CONFIG.arenaRadius * this.view.scale;
     const layout: 'center' | 'beside' | 'below' =
-      sideFree >= 230 * this.u ? 'beside' : belowFree >= (this.gameOverNote ? 240 : 190) * this.u ? 'below' : 'center';
-    const lines = [
+      sideFree >= 230 * this.u ? 'beside' : belowFree >= (190 + (this.gameOverNote ? 50 : 0) + (this.reward ? 84 : 0)) * this.u ? 'below' : 'center';
+    const lines: { text: string; font: string; color: string; gap: number; glow?: string }[] = [
       { text: title, font: this.font(900, 44), color, gap: 48 },
       { text: sub, font: this.font(600, 16), color: '#b7c0cc', gap: 32 },
     ];
     if (this.gameOverNote) lines.push({ text: this.gameOverNote, font: this.font(800, 14), color: C.revealAccent, gap: 28 });
+    const rw = this.reward;
+    if (rw) {
+      const el = Math.max(0, performance.now() / 1000 - rw.at);
+      const k = Math.min(1, el / 1.0);
+      const shown = Math.round(rw.earned * (1 - Math.pow(1 - k, 3)));
+      lines.push({ text: `+${shown} SHELLS`, font: this.font(900, 24), color: '#ffc247', gap: 34, glow: '#ffb347' });
+      const bits: string[] = [];
+      if (rw.parts.play) bits.push(`Played ${rw.parts.play}`);
+      if (rw.parts.result) bits.push(`Result ${rw.parts.result}`);
+      if (rw.parts.kills) bits.push(`Kills ${rw.parts.kills}`);
+      if (rw.parts.rounds) bits.push(`Rounds ${rw.parts.rounds}`);
+      lines.push({ text: bits.join('  -  '), font: this.font(600, 12), color: '#9aa7b8', gap: 22 });
+      lines.push({ text: rw.next ?? `Balance: ${rw.balance} Shells`, font: this.font(700, 12), color: rw.next ? '#c9d1dc' : '#9aa7b8', gap: 20 });
+    }
     this.panel(
       lines,
       [

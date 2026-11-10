@@ -1,8 +1,12 @@
+import { drawArenaSwatch } from '../arena';
 import type { ArenaRenderer } from '../arena';
 import { drawCharacter, drawShadow } from '../characters';
 import { CHANGELOG } from '../changelog';
 import { CONFIG, PLAYER_STYLES } from '../config';
 import { CREDITS } from '../credits';
+import { KILL_FX_SECONDS, drawKillEffect, drawShotLine } from '../effects';
+import { CATEGORIES, RARITY, isEquipped, isOwned, itemById, ownedCount } from '../shop';
+import type { ShopItem } from '../shop';
 import { winRate } from '../stats';
 import { THEME } from '../theme';
 import { isNarrow, ui } from '../ui';
@@ -32,6 +36,8 @@ const TITLES: Record<string, string> = {
   multiplayer: 'MULTIPLAYER',
   howto: 'HOW TO PLAY',
   stats: 'STATS',
+  shop: 'SHOP',
+  profile: 'PROFILE',
   settings: 'SETTINGS',
   credits: 'CREDITS',
   changelog: 'CHANGELOG',
@@ -70,6 +76,9 @@ export class MenuView {
   private mini = new View();
   private clip: { y0: number; y1: number } | undefined;
   private lastFocusKey = '';
+  private toastSeen = 0;
+  private toastAt = -10;
+  private profileContentH = 0;
   private statsContentH = 0; // measured last frame so the Stats panel can shrink to its content
 
   hit(x: number, y: number): Region | null {
@@ -149,6 +158,12 @@ export class MenuView {
       case 'stats':
         this.drawStats(ctx, model, W, H, top, u);
         break;
+      case 'shop':
+        this.drawShop(ctx, model, W, H, top, u, now);
+        break;
+      case 'profile':
+        this.drawProfile(ctx, model, W, H, top, u, now);
+        break;
       case 'credits':
         this.drawCredits(ctx, model, W, H, top, u);
         break;
@@ -157,10 +172,12 @@ export class MenuView {
         break;
     }
 
+    this.drawWallet(ctx, model.progress.shells, u, now);
+
     // Footer: version and key hints.
     ctx.textBaseline = 'alphabetic';
     this.text(ctx, `v${APP_VERSION}`, 16 * u, H - 16 * u, 700, 12 * u, C.textDim, 'left');
-    if (!ui.touch) this.text(ctx, 'Up/Down select   Left/Right adjust   Enter confirm   Esc back', W / 2, H - 16 * u, 600, 12 * u, C.textDim, 'center');
+    if (!ui.touch) this.text(ctx, model.screen === 'shop' ? 'Up/Down select   Left/Right category   Enter buy / equip   Esc back' : 'Up/Down select   Left/Right adjust   Enter confirm   Esc back', W / 2, H - 16 * u, 600, 12 * u, C.textDim, 'center');
   }
 
   // ---- background decoration ------------------------------------------------------------
@@ -521,6 +538,579 @@ export class MenuView {
       this.text(ctx, l, W / 2, y, 600, 14 * u, '#b7c0cc', 'center');
     }
     this.backButton(ctx, model, W, top + h + 18 * u, u);
+  }
+
+  // ---- wallet, rarity and shop ---------------------------------------------------------------
+
+  private fmt(n: number): string {
+    return String(Math.floor(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  /** Gold Shell coin icon. */
+  private shellIcon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, now: number): void {
+    ctx.save();
+    ctx.shadowColor = '#ffb347';
+    ctx.shadowBlur = r * (0.9 + 0.3 * Math.sin(now * 2.6));
+    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.1, x, y, r);
+    g.addColorStop(0, '#fff3b0');
+    g.addColorStop(0.55, '#ffc247');
+    g.addColorStop(1, '#c98a1e');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(120,70,0,0.55)';
+    ctx.lineWidth = Math.max(1, r * 0.12);
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.68, 0, Math.PI * 2);
+    ctx.stroke();
+    // six chamber-like dots
+    ctx.fillStyle = 'rgba(120,70,0,0.55)';
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 - Math.PI / 2;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * r * 0.38, y + Math.sin(a) * r * 0.38, r * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Wallet chip in the top-left corner (balance of Shells). */
+  private drawWallet(ctx: CanvasRenderingContext2D, shells: number, u: number, now: number): void {
+    const txt = this.fmt(shells);
+    ctx.font = `900 ${Math.round(15 * u)}px ${FONT}`;
+    const tw = ctx.measureText(txt).width;
+    const h = 34 * u;
+    const w = 44 * u + tw;
+    const x = 16 * u;
+    const y = 16 * u;
+    ctx.save();
+    this.rr(ctx, x, y, w, h, h / 2);
+    ctx.fillStyle = 'rgba(14, 18, 28, 0.88)';
+    ctx.fill();
+    ctx.shadowColor = 'rgba(255,194,71,0.55)';
+    ctx.shadowBlur = 10;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,194,71,0.65)';
+    ctx.stroke();
+    ctx.restore();
+    this.shellIcon(ctx, x + 19 * u, y + h / 2, 10 * u, now);
+    this.text(ctx, txt, x + 36 * u, y + h / 2 + 5.5 * u, 900, 15 * u, '#ffd479', 'left');
+  }
+
+  /** Border + glow + shimmer for a rarity. Draws the path in the current rr() shape. */
+  private rarityFrame(
+    ctx: CanvasRenderingContext2D,
+    rarity: ShopItem['rarity'],
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    u: number,
+    now: number,
+    seed: number,
+    focused: boolean,
+  ): void {
+    const R = RARITY[rarity];
+    const breathe = 1 + R.pulse * Math.sin(now * 2.2 + seed * 1.3);
+    // faint rarity wash behind the card
+    if (R.rank > 0) {
+      const g = ctx.createLinearGradient(x, y, x + w, y);
+      g.addColorStop(0, R.color + (R.rank >= 3 ? '38' : R.rank === 2 ? '2c' : '22'));
+      g.addColorStop(1, 'rgba(14,18,28,0)');
+      this.rr(ctx, x, y, w, h, r);
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+    // glowing border
+    ctx.save();
+    this.rr(ctx, x, y, w, h, r);
+    ctx.lineWidth = focused ? 2.5 : R.rank >= 2 ? 2 : 1.5;
+    ctx.strokeStyle = focused ? C.hiddenAccent : R.rank > 0 ? R.color : 'rgba(255,255,255,0.14)';
+    if (R.glow > 0) {
+      ctx.shadowColor = R.color;
+      ctx.shadowBlur = R.glow * u * breathe;
+      ctx.stroke();
+    }
+    ctx.stroke();
+    ctx.restore();
+    // legendary shimmer sweep + twinkles
+    if (R.rank >= 3) {
+      ctx.save();
+      this.rr(ctx, x, y, w, h, r);
+      ctx.clip();
+      const sweep = ((now * 0.42 + seed * 0.17) % 1.6) - 0.3;
+      const sx = x + w * sweep;
+      const g = ctx.createLinearGradient(sx - 40 * u, y, sx + 40 * u, y + h);
+      g.addColorStop(0, 'rgba(255,230,160,0)');
+      g.addColorStop(0.5, 'rgba(255,230,160,0.28)');
+      g.addColorStop(1, 'rgba(255,230,160,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+      ctx.restore();
+    }
+    if (R.rank >= 2) {
+      const n = R.rank >= 3 ? 3 : 1;
+      for (let i = 0; i < n; i++) {
+        const tw = Math.max(0, Math.sin(now * 2.6 + seed * 2.1 + i * 2.4));
+        if (tw <= 0.05) continue;
+        const tx = x + w * (0.3 + 0.28 * i + 0.1 * Math.sin(seed + i));
+        const ty = y + (i % 2 ? h - 5 * u : 5 * u);
+        this.sparkle(ctx, tx, ty, (3 + 3.5 * tw) * u, R.color, tw);
+      }
+    }
+  }
+
+  private sparkle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, a: number): void {
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = r * 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.quadraticCurveTo(x, y, x, y + r);
+    ctx.quadraticCurveTo(x, y, x - r, y);
+    ctx.quadraticCurveTo(x, y, x, y - r);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** Live preview of an item inside a square box. */
+  private drawPreview(ctx: CanvasRenderingContext2D, item: ShopItem, bx: number, by: number, bs: number, u: number, now: number): void {
+    const R = RARITY[item.rarity];
+    const cx = bx + bs / 2;
+    const cy = by + bs / 2;
+    ctx.save();
+    this.rr(ctx, bx, by, bs, bs, 12 * u);
+    ctx.fillStyle = 'rgba(6, 8, 14, 0.8)';
+    ctx.fill();
+    ctx.clip();
+    if (R.rank > 0) {
+      const g = ctx.createRadialGradient(cx, cy, bs * 0.05, cx, cy, bs * 0.7);
+      g.addColorStop(0, R.color + (R.rank >= 3 ? '66' : R.rank === 2 ? '4d' : '38'));
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(bx, by, bs, bs);
+    }
+    if (item.category === 'skin') {
+      const mv = this.mini;
+      mv.scale = (bs * 0.3) / (CONFIG.playerRadius * THEME.art.characterScale);
+      mv.offsetX = cx;
+      mv.offsetY = cy;
+      mv.cssWidth = mv.cssHeight = bs;
+      drawShadow(ctx, mv, { x: 0, y: 0 });
+      drawCharacter(ctx, mv, { x: 0, y: 0 }, { x: 1, y: 0 }, {
+        color: item.skin?.color ?? PLAYER_STYLES[0].color,
+        skin: item.skin,
+        name: item.name,
+        isHuman: false,
+        time: now,
+      });
+    } else if (item.category === 'shot') {
+      const st = item.shot ?? { core: PLAYER_STYLES[0].color, glow: PLAYER_STYLES[0].color, flash: THEME.colors.flash, mode: 'solid' as const };
+      const loop = (now % 1.5) / 1.5;
+      const a = { x: bx + bs * 0.16, y: cy };
+      const b = { x: bx + bs * 0.9, y: cy };
+      // muzzle flash star
+      ctx.fillStyle = st.mode === 'rainbow' ? `hsl(${(now * 540) % 360}, 100%, 80%)` : st.flash;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2;
+        const rr = i % 2 === 0 ? bs * 0.13 : bs * 0.05;
+        const px = a.x + Math.cos(ang) * rr;
+        const py = a.y + Math.sin(ang) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      drawShotLine(ctx, a, b, st, 0.65 + 0.35 * Math.sin(loop * Math.PI), now, 0.7);
+    } else if (item.category === 'kill') {
+      if (item.kill) {
+        const t = ((now % 2.0) / 2.0) * (KILL_FX_SECONDS + 0.35);
+        const Rk = item.kill === 'lightning' ? bs * 0.075 : bs * 0.1;
+        ctx.fillStyle = 'rgba(90,96,107,0.9)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, Rk * (t < 0.1 ? 1 : 0.8), 0, Math.PI * 2);
+        ctx.fill();
+        drawKillEffect(ctx, item.kill, cx, cy, Rk, t);
+      } else {
+        this.text(ctx, 'NO EFFECT', cx, cy + 4 * u, 800, 8.5 * u, C.textDim, 'center', 0.5 * u);
+      }
+    } else if (item.category === 'arena') {
+      drawArenaSwatch(ctx, cx, cy, bs * 0.4, item.arena ?? null, now);
+    } else {
+      // titles: a glowing star badge
+      ctx.save();
+      ctx.shadowColor = R.rank > 0 ? R.color : '#8b97a8';
+      ctx.shadowBlur = 12 * u;
+      ctx.fillStyle = R.rank > 0 ? R.color : '#8b97a8';
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const ang = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const rr = i % 2 === 0 ? bs * 0.3 : bs * 0.13;
+        const px = cx + Math.cos(ang) * rr;
+        const py = cy + Math.sin(ang) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  private drawShopCard(
+    ctx: CanvasRenderingContext2D,
+    model: MenuModel,
+    item: ShopItem,
+    index: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    u: number,
+    focused: boolean,
+    now: number,
+    compact = false,
+  ): void {
+    const p = model.progress;
+    const owned = isOwned(p, item.id);
+    const equipped = isEquipped(p, item.id);
+    const R = RARITY[item.rarity];
+    this.rr(ctx, x, y, w, h, 14 * u);
+    ctx.fillStyle = focused ? 'rgba(34, 44, 62, 0.96)' : 'rgba(14, 18, 28, 0.9)';
+    ctx.fill();
+    this.rarityFrame(ctx, item.rarity, x, y, w, h, 14 * u, u, now, index, focused);
+    this.regions.push({ x, y, w, h, index, part: 'main', clip: this.clip });
+
+    const bs = h - 16 * u;
+    this.drawPreview(ctx, item, x + 8 * u, y + 8 * u, bs, u, now);
+
+    const tx = x + 8 * u + bs + 14 * u;
+    if (compact) {
+      this.text(ctx, R.label, tx, y + 19 * u, 800, 9 * u, R.rank > 0 ? R.color : C.textDim, 'left', 1.3 * u);
+      this.text(ctx, item.name, tx, y + 38 * u, 800, 16 * u, C.text, 'left');
+      this.text(ctx, item.blurb, tx, y + 55 * u, 600, 11 * u, C.textDim, 'left');
+    } else {
+      this.text(ctx, R.label, tx, y + 24 * u, 800, 10 * u, R.rank > 0 ? R.color : C.textDim, 'left', 1.5 * u);
+      this.text(ctx, item.name, tx, y + 45 * u, 800, 17 * u, C.text, 'left');
+      this.text(ctx, item.blurb, tx, y + 64 * u, 600, 12 * u, C.textDim, 'left');
+    }
+
+    // Status pill on the right
+    const pw = 92 * u;
+    const ph = 30 * u;
+    const px = x + w - pw - 12 * u;
+    const py = y + h / 2 - ph / 2;
+    const armed = model.armedId === item.id;
+    const afford = p.shells >= item.price;
+    this.rr(ctx, px, py, pw, ph, ph / 2);
+    if (equipped) {
+      ctx.fillStyle = 'rgba(93,211,158,0.22)';
+      ctx.fill();
+      ctx.strokeStyle = C.win;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      this.text(ctx, 'EQUIPPED', px + pw / 2, py + ph / 2 + 4 * u, 800, 11 * u, C.win, 'center', 0.5 * u);
+    } else if (owned) {
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      this.text(ctx, 'EQUIP', px + pw / 2, py + ph / 2 + 4 * u, 800, 12 * u, C.text, 'center', 1 * u);
+    } else if (armed) {
+      const k = 0.7 + 0.3 * Math.sin(now * 9);
+      ctx.save();
+      ctx.shadowColor = '#ffb347';
+      ctx.shadowBlur = 16 * u * k;
+      ctx.fillStyle = '#ffc247';
+      ctx.fill();
+      ctx.restore();
+      this.text(ctx, 'TAP TO BUY', px + pw / 2, py + ph / 2 + 4 * u, 900, 11 * u, '#2a1a00', 'center', 0.5 * u);
+    } else {
+      ctx.fillStyle = afford ? 'rgba(255,194,71,0.18)' : 'rgba(255,255,255,0.05)';
+      ctx.fill();
+      ctx.strokeStyle = afford ? 'rgba(255,194,71,0.8)' : 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      this.shellIcon(ctx, px + 17 * u, py + ph / 2, 7.5 * u, afford ? now : 0);
+      this.text(ctx, this.fmt(item.price), px + 30 * u, py + ph / 2 + 5 * u, 900, 14 * u, afford ? '#ffd479' : C.textDim, 'left');
+    }
+  }
+
+  private drawShop(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number, now: number): void {
+    const w = Math.min(640 * u, W - 32);
+    const x = (W - w) / 2;
+    const narrow = isNarrow(W);
+
+    // Category tabs
+    const compact = H < 520;
+    const th = (compact ? (ui.touch ? 40 : 34) : ui.touch ? 44 : 38) * u;
+    const gap = 6 * u;
+    const tabW = (w - gap * (CATEGORIES.length - 1)) / CATEGORIES.length;
+    CATEGORIES.forEach((c, i) => {
+      const tx = x + i * (tabW + gap);
+      const active = i === model.shopTab;
+      this.rr(ctx, tx, top, tabW, th, 10 * u);
+      if (active) {
+        ctx.save();
+        ctx.shadowColor = C.hiddenAccent;
+        ctx.shadowBlur = 14 * u;
+        ctx.fillStyle = C.hiddenAccent;
+        ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.fillStyle = 'rgba(14, 18, 28, 0.88)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      this.text(ctx, c.label, tx + tabW / 2, top + th / 2 + 4 * u, 800, (narrow ? 10 : 12) * u, active ? '#0b1117' : C.textDim, 'center', (narrow ? 0.4 : 1) * u);
+      this.regions.push({ x: tx, y: top, w: tabW, h: th, index: i, part: 'tab' });
+    });
+
+    // Layout: card list between the tabs and the bottom Back button
+    const items = model.items();
+    const n = items.length - 1; // last item is Back
+    const btnH = Math.max(46 * u, ui.touch ? 48 : 0);
+    const backY = compact ? H - btnH - 8 : H - btnH - (ui.touch ? 14 : 44 * u);
+    const toastH = 26 * u;
+    const listTop = top + th + (compact ? 8 : 12) * u;
+    const avail = Math.max(80 * u, compact ? backY - 8 * u - listTop : backY - toastH - 10 * u - listTop);
+    const ch = (compact ? 66 : 84) * u;
+    const cg = (compact ? 8 : 10) * u;
+    const total = n * (ch + cg) - cg;
+    const scrollable = total > avail;
+    model.maxScroll = scrollable ? total - avail : 0;
+    model.scroll = Math.max(0, Math.min(model.maxScroll, model.scroll));
+
+    const key = 'shop:' + model.shopTab + ':' + model.focus;
+    if (scrollable && key !== this.lastFocusKey && model.focus < n) {
+      const itemTop = model.focus * (ch + cg);
+      if (itemTop < model.scroll) model.scroll = itemTop;
+      else if (itemTop + ch > model.scroll + avail) model.scroll = itemTop + ch - avail;
+      model.scroll = Math.max(0, Math.min(model.maxScroll, model.scroll));
+    }
+    this.lastFocusKey = key;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - 14 * u, listTop - 6 * u, w + 28 * u, avail + 12 * u);
+    ctx.clip();
+    this.clip = { y0: listTop - 6 * u, y1: listTop + avail + 6 * u };
+    let y = listTop - (scrollable ? model.scroll : 0);
+    for (let i = 0; i < n; i++) {
+      const id = items[i].id.slice(5);
+      const item = itemById(id);
+      if (item && y + ch > listTop - 20 && y < listTop + avail + 20) this.drawShopCard(ctx, model, item, i, x, y, w, ch, u, i === model.focus, now, compact);
+      else if (item) this.regions.push({ x, y, w, h: ch, index: i, part: 'main', clip: this.clip });
+      y += ch + cg;
+    }
+    ctx.restore();
+    this.clip = undefined;
+    if (scrollable) {
+      const sh = Math.max(28, (avail * avail) / total);
+      const sy = listTop + (model.scroll / model.maxScroll) * (avail - sh);
+      this.rr(ctx, x + w + 6 * u, sy, 4, sh, 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fill();
+    }
+
+    // Toast (latest shop message, fades after ~2.4s)
+    if (model.toast.seq !== this.toastSeen) {
+      this.toastSeen = model.toast.seq;
+      this.toastAt = now;
+    }
+    const age = now - this.toastAt;
+    if (model.toast.text && age < 2.4) {
+      const a = Math.min(1, (2.4 - age) / 0.5);
+      const col = model.toast.kind === 'good' ? C.win : model.toast.kind === 'bad' ? C.danger : C.revealAccent;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.font = `800 ${Math.round(13 * u)}px ${FONT}`;
+      const tw = ctx.measureText(model.toast.text).width + 32 * u;
+      const toastY = compact ? backY + btnH / 2 - toastH / 2 : backY - toastH - 4 * u;
+      this.rr(ctx, W / 2 - tw / 2, toastY, tw, toastH, toastH / 2);
+      ctx.fillStyle = 'rgba(8,10,16,0.92)';
+      ctx.fill();
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = a;
+      this.text(ctx, model.toast.text, W / 2, (compact ? backY + btnH / 2 - toastH / 2 : backY - toastH - 4 * u) + toastH / 2 + 4.5 * u, 800, 13 * u, col, 'center');
+      ctx.restore();
+    }
+
+    const bw = Math.min(compact ? 130 * u : 220 * u, w);
+    this.drawItem(ctx, items[n], n, compact ? x : (W - bw) / 2, backY, bw, btnH, u, model.focus === n);
+  }
+
+  private drawProfile(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number, now: number): void {
+    const p = model.progress;
+    const st = model.stats;
+    const w = Math.min(560 * u, W - 32);
+    const x = (W - w) / 2;
+    const btnH = Math.max(46 * u, ui.touch ? 48 : 0);
+    const gap = 10 * u;
+    const bottomH = btnH * 2 + gap;
+    const avail = Math.max(140 * u, H - top - bottomH - (ui.touch ? 28 : 64 * u));
+    const viewH = this.profileContentH > 0 ? Math.min(avail, Math.max(140 * u, this.profileContentH)) : avail;
+    this.rr(ctx, x, top, w, viewH, 16 * u);
+    ctx.fillStyle = 'rgba(14, 18, 28, 0.88)';
+    ctx.fill();
+
+    ctx.save();
+    this.rr(ctx, x, top, w, viewH, 16 * u);
+    ctx.clip();
+    const pad = 20 * u;
+    const left = x + pad;
+    const right = x + w - pad;
+    const innerW = w - pad * 2;
+    let y = top + pad - model.scroll;
+
+    // Header: avatar with rarity glow, name, title, member since
+    const skinItem = itemById(p.equipped.skin);
+    const titleItem = itemById(p.equipped.title);
+    const skinR = RARITY[skinItem?.rarity ?? 'common'];
+    const titleR = RARITY[titleItem?.rarity ?? 'common'];
+    const av = 74 * u;
+    const ax = left;
+    const ay = y;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ax + av / 2, ay + av / 2, av / 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(6, 8, 14, 0.85)';
+    ctx.shadowColor = skinR.rank > 0 ? skinR.color : 'rgba(255,255,255,0.3)';
+    ctx.shadowBlur = Math.max(6, skinR.glow) * u * (1 + skinR.pulse * Math.sin(now * 2.2));
+    ctx.fill();
+    ctx.lineWidth = 3 * u;
+    ctx.strokeStyle = skinR.rank > 0 ? skinR.color : 'rgba(255,255,255,0.35)';
+    ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ax + av / 2, ay + av / 2, av / 2 - 2, 0, Math.PI * 2);
+    ctx.clip();
+    const mv = this.mini;
+    mv.scale = (av * 0.25) / (CONFIG.playerRadius * THEME.art.characterScale);
+    mv.offsetX = ax + av / 2;
+    mv.offsetY = ay + av / 2;
+    mv.cssWidth = mv.cssHeight = av;
+    drawShadow(ctx, mv, { x: 0, y: 0 });
+    drawCharacter(ctx, mv, { x: 0, y: 0 }, { x: Math.cos(now * 0.6), y: Math.sin(now * 0.6) }, {
+      color: skinItem?.skin?.color ?? PLAYER_STYLES[0].color,
+      skin: skinItem?.skin,
+      name: p.name,
+      isHuman: false,
+      time: now,
+    });
+    ctx.restore();
+
+    const nx = ax + av + 16 * u;
+    this.text(ctx, p.name, nx, ay + 28 * u, 900, 24 * u, C.text, 'left');
+    ctx.save();
+    if (titleR.rank > 0) {
+      ctx.shadowColor = titleR.color;
+      ctx.shadowBlur = titleR.glow * 0.6 * u;
+    }
+    this.text(ctx, (titleItem?.title ?? 'Rookie').toUpperCase(), nx, ay + 50 * u, 800, 13 * u, titleR.rank > 0 ? titleR.color : C.textDim, 'left', 2 * u);
+    ctx.restore();
+    const since = new Date(p.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    this.text(ctx, `Playing since ${since}`, nx, ay + 68 * u, 600, 12 * u, C.textDim, 'left');
+    y += av + 22 * u;
+
+    // Level / achievements teaser (arrives in the next update)
+    this.rr(ctx, left, y, innerW, 40 * u, 10 * u);
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    this.text(ctx, 'LEVEL, XP and ACHIEVEMENTS: coming soon', x + w / 2, y + 25 * u, 700, 12 * u, C.textDim, 'center', 1 * u);
+    y += 40 * u + 18 * u;
+
+    // Stat tiles
+    const oc = ownedCount(p);
+    const wr = st.played > 0 ? Math.round((st.wins / st.played) * 100) : 0;
+    const tiles: [string, string, string?][] = [
+      ['SHELLS', this.fmt(p.shells), '#ffd479'],
+      ['MATCHES', String(st.played)],
+      ['WINS', String(st.wins)],
+      ['WIN RATE', `${wr}%`],
+      ['BEST STREAK', String(st.bestStreak)],
+      ['ITEMS', `${oc.owned}/${oc.total}`],
+    ];
+    const cols = innerW < 400 * u ? 2 : 3;
+    const tg = 10 * u;
+    const tw = (innerW - tg * (cols - 1)) / cols;
+    const tH = 56 * u;
+    tiles.forEach(([label, value, color], i) => {
+      const tx = left + (i % cols) * (tw + tg);
+      const ty = y + Math.floor(i / cols) * (tH + tg);
+      this.rr(ctx, tx, ty, tw, tH, 10 * u);
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fill();
+      this.text(ctx, value, tx + tw / 2, ty + 27 * u, 900, 21 * u, color ?? C.text, 'center');
+      this.text(ctx, label, tx + tw / 2, ty + 45 * u, 700, 10 * u, C.textDim, 'center', 1.5 * u);
+    });
+    y += Math.ceil(tiles.length / cols) * (tH + tg) + 12 * u;
+
+    // Loadout: what is equipped, colored by rarity
+    this.text(ctx, 'LOADOUT', left, y, 800, 12 * u, C.text, 'left', 2 * u);
+    y += 8 * u;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(left, y, innerW, 1);
+    for (const c of CATEGORIES) {
+      y += 28 * u;
+      const it = itemById(p.equipped[c.id]);
+      const R = RARITY[it?.rarity ?? 'common'];
+      this.text(ctx, c.singular.toUpperCase(), left, y, 700, 10 * u, C.textDim, 'left', 1.2 * u);
+      ctx.save();
+      if (R.rank > 0) {
+        ctx.shadowColor = R.color;
+        ctx.shadowBlur = R.glow * 0.5 * u;
+      }
+      this.text(ctx, it?.name ?? '-', right, y, 800, 14 * u, R.rank > 0 ? R.color : C.text, 'right');
+      ctx.restore();
+    }
+    y += 22 * u;
+    ctx.restore();
+
+    const total = y + model.scroll - top + pad * 0.5;
+    this.profileContentH = total;
+    model.maxScroll = Math.max(0, total - viewH);
+    model.scroll = Math.max(0, Math.min(model.maxScroll, model.scroll));
+    if (model.maxScroll > 0) {
+      const sh = Math.max(30 * u, (viewH * viewH) / total);
+      const sy = top + (model.scroll / model.maxScroll) * (viewH - sh);
+      this.rr(ctx, x + w - 8 * u, sy, 4 * u, sh, 2 * u);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fill();
+    }
+
+    // Buttons in a 2x2 grid under the panel
+    const items = model.items();
+    const bw = (w - gap) / 2;
+    const by = top + viewH + 14 * u;
+    items.forEach((it, i) => {
+      const bx = x + (i % 2) * (bw + gap);
+      const byy = by + Math.floor(i / 2) * (btnH + gap);
+      this.drawItem(ctx, it, i, bx, byy, bw, btnH, u, model.focus === i);
+    });
   }
 
   private drawStats(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number): void {

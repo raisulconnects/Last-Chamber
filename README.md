@@ -8,7 +8,7 @@ A fast, top-down elimination game for the browser. Move blind, aim blind, and tr
 
 ### [Play now: lastchamber.netlify.app](https://lastchamber.netlify.app)
 
-![Version](https://img.shields.io/badge/version-0.5.0-4cc9f0)
+![Version](https://img.shields.io/badge/version-0.6.0-4cc9f0)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/built%20with-Vite-646cff?logo=vite&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-Vitest-6e9f18?logo=vitest&logoColor=white)
@@ -66,7 +66,20 @@ Play > Single Player offers:
 | **Marathon** | 10 s rounds, gentle shrink, 30 rounds |
 | **Custom** | 1-5 bots, hidden and reveal time, shrink speed, minimum circle, max rounds, bot difficulty (saved between sessions) |
 
-Multiplayer is shown as "coming soon". The menu also includes How to Play, **Stats** (record, streaks and per-mode results, saved on your device), Settings (volume, sound, reduce flashing), Credits and an in-game Changelog.
+Multiplayer is shown as "coming soon". The menu also includes a **Shop**, a **Profile**, How to Play, **Stats** (record, streaks and per-mode results, saved on your device), Settings (volume, sound, reduce flashing), Credits and an in-game Changelog.
+
+## Shells, shop and profile
+Finishing a match pays **Shells**: a base for playing, bonuses for a win, kills and rounds survived, scaled by mode, bot difficulty and bot count. Spend them in the **Shop** on cosmetics that never affect gameplay:
+
+| Category | What it changes |
+| --- | --- |
+| Skins | How your character looks (colors, stripes, trim, glow, chrome, ghost) |
+| Shot styles | Your tracer and muzzle flash (solid colors, rainbow, pulse, comet) |
+| Kill effects | An effect where your shot eliminates someone (sparks, rings, confetti, lightning) |
+| Arena themes | Floor tint, rim and safe-circle colors, with animated overlays |
+| Titles | A title shown on your Profile |
+
+Items come in Common, Rare, Epic and Legendary rarities; higher rarities glow and animate. Everything is saved on your device. See [ROADMAP.md](ROADMAP.md) for what comes next (levels, achievements, daily rewards).
 
 ## Controls
 
@@ -100,7 +113,7 @@ npm run preview  # serve the production build locally
 
 ```
 src/
-  config.ts  settings.ts  stats.ts  types.ts        tuning values, match presets, shared types
+  config.ts  settings.ts  stats.ts  economy.ts  shop.ts  progress.ts  cosmetics.ts  types.ts        tuning values, match presets, shared types
   geometry.ts  resolve.ts  movement.ts    pure simulation rules
   match.ts  bot.ts                        state machine and bot AI
   input.ts  touch.ts  ui.ts  view.ts      keyboard, mouse, touch sticks, screen transform
@@ -118,6 +131,7 @@ tests/                                    Vitest suites
 | `match.ts` | State machine READY / HIDDEN / RESOLVE / REVEAL / GAME_OVER with a fixed-step `update(dt, commands)` |
 | `bot.ts` | Bots only know positions revealed in earlier rounds and output the same `Command`s as a human |
 | `settings.ts` | Mode presets, Custom limits and clamping, bot difficulty profiles, saved preferences |
+| `economy.ts`, `shop.ts`, `progress.ts`, `cosmetics.ts` | Pure Shell payouts, shop catalog and buy/equip logic, saved wallet and loadout, equipped items to render parameters |
 | `stats.ts` | Pure local stats: per-match records, streaks, per-mode results, safe load/save |
 | `touch.ts` | Floating dual virtual sticks built on Pointer Events |
 

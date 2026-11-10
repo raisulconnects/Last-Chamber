@@ -2,13 +2,17 @@ import { AudioManager } from './audio';
 import { loadFloorTiles } from './assets';
 import { BotBrain } from './bot';
 import { CONFIG } from './config';
+import { loadoutOf } from './cosmetics';
+import { calcPayout } from './economy';
 import { GameEventDetector } from './events';
 import { Input } from './input';
 import { Match } from './match';
 import { MenuModel } from './menu/menuModel';
 import type { MenuAction, MenuEnv } from './menu/menuModel';
 import { Renderer } from './render';
+import { addShells, loadProgress, sanitizeName, saveProgress } from './progress';
 import { DIFFICULTY, loadPrefs, savePrefs } from './settings';
+import { nextUnlock } from './shop';
 import { emptyStats, loadStats, recordMatch, saveStats } from './stats';
 import { THEME } from './theme';
 import { ui } from './ui';
@@ -49,6 +53,8 @@ const env: MenuEnv = { volume: audio.volume, muted: audio.muted, reduceFlashing:
 const menu = new MenuModel(env);
 let stats = loadStats();
 menu.stats = stats;
+menu.progress = loadProgress();
+renderer.loadout = loadoutOf(menu.progress);
 
 // Per-match tally for the human player, recorded once when the match ends.
 let currentMode = 'Classic';
@@ -64,6 +70,7 @@ match.onStart = () => {
   tally = { kills: 0, diedRound: 0 };
   recorded = false;
   renderer.gameOverNote = null;
+  renderer.reward = null;
   brains.clear();
   const profile = DIFFICULTY[match.settings.botDifficulty];
   for (const p of match.players) if (!p.isHuman) brains.set(p.id, new BotBrain(p.id, Math.random, profile));
@@ -133,6 +140,20 @@ function recordFinishedMatch(): void {
   if (r.newBestStreak && stats.bestStreak > 1) notes.push('New best streak!');
   if (r.newBestSurvived && stats.played > 1) notes.push('New best survival!');
   renderer.gameOverNote = notes.length ? notes.join('  -  ') : null;
+
+  // Pay out Shells once for this finished match.
+  const pay = calcPayout({ mode: currentMode, bots: match.settings.botCount, difficulty: match.settings.botDifficulty, result, rounds: match.round, survived, kills: tally.kills });
+  const wallet = addShells(menu.progress, pay.total);
+  menu.progress = wallet;
+  saveProgress(wallet);
+  const nu = nextUnlock(wallet);
+  renderer.reward = {
+    earned: pay.total,
+    parts: pay.parts,
+    balance: wallet.shells,
+    next: nu ? (nu.missing > 0 ? `${nu.missing} Shells to ${nu.item.name}` : `You can afford ${nu.item.name}!`) : null,
+    at: performance.now() / 1000,
+  };
 }
 
 // ---- audio controls (DOM) + menu settings sync -----------------------------------------------
@@ -175,6 +196,18 @@ function applyMenuAction(a: MenuAction | null): void {
     case 'start':
       startMatch(a.settings, a.modeName);
       break;
+    case 'saveProgress':
+      saveProgress(menu.progress);
+      renderer.loadout = loadoutOf(menu.progress);
+      break;
+    case 'rename': {
+      const v = window.prompt('Your name (max 14 characters)', menu.progress.name);
+      if (v !== null) {
+        menu.progress = { ...menu.progress, name: sanitizeName(v) };
+        saveProgress(menu.progress);
+      }
+      break;
+    }
     case 'resetStats':
       stats = emptyStats();
       menu.stats = stats;
@@ -242,7 +275,7 @@ canvas.addEventListener('mousemove', (e) => {
   if (!inMenu()) return;
   const p = canvasPoint(e);
   const hit = renderer.menu.hit(p.x, p.y);
-  if (hit) menu.hover(hit.index);
+  if (hit && hit.part !== 'tab') menu.hover(hit.index);
   canvas.style.cursor = hit ? 'pointer' : 'default';
 });
 
@@ -304,7 +337,7 @@ canvas.addEventListener(
     if (inMenu() && menu.screen === 'changelog') {
       menu.move(e.deltaY > 0 ? 1 : -1);
       e.preventDefault();
-    } else if (inMenu() && menu.screen === 'stats') {
+    } else if (inMenu() && (menu.screen === 'stats' || menu.screen === 'shop' || menu.screen === 'profile')) {
       menu.scrollBy(e.deltaY);
       e.preventDefault();
     }

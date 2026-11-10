@@ -4,6 +4,16 @@ All notable changes to Last Chamber. This file is shown in-game on the Changelog
 Format per release: `## [version] - YYYY-MM-DD - short title`, then `### Added` / `### Changed` / `### Fixed` lists.
 To release: bump `version` in `package.json` and add an entry at the top.
 
+## [0.6.0] - 2026-11-10 - Shells, Shop and Profile
+### Added
+- Shells: a currency earned by finishing matches (more for wins, kills, surviving rounds, harder modes and more bots)
+- Shop with five categories: skins, shot styles, kill effects, arena themes and titles, in four rarities with glowing frames and live previews
+- Profile screen with your name, title, loadout, Shells and headline stats
+- Game-over panel shows the Shells you earned, a breakdown, and how far you are from your next unlock
+- Wallet chip on every menu screen
+### Changed
+- Equipped cosmetics only change how your own character, shots, kills and arena look; rules, timings and bot behavior are unchanged
+
 ## [0.5.0] - 2026-11-10 - Stats and progress
 ### Added
 - Stats screen in the main menu: matches, wins, win rate, streaks, kills, best survival, per-mode record and the last 10 matches

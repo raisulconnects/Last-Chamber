@@ -18,7 +18,7 @@ Real-time play with other humans. The simulation is already driven by `Command`s
 ### Stats and progress (done in 0.5.0)
 - Local win / loss / draw record, streaks, per-mode stats and recent matches (localStorage), Stats screen in the menu
 
-### In-game currency, shop and player profile (designed, not built yet)
+### In-game currency, shop and player profile (phase 1 built in 0.6.0)
 Goal: a satisfying grind loop even in single player. Local-only storage for now (server-side validation comes with online multiplayer, since local data is easy to edit). All modes stay free. Each build phase below gets its own plan before coding.
 
 **Currency:** **Shells** (revolver theme). One soft currency, earned only by playing; no real-money purchases.
@@ -29,7 +29,7 @@ Goal: a satisfying grind loop even in single player. Local-only storage for now 
 - Difficulty: Easy x0.8, Normal x1.0, Hard x1.3
 - Bots: `clamp(1 + 0.1 x (bots - 2), 0.8, 1.5)`
 - Mode: Classic x1.0, Quick Draw x0.8, Crowded Arena x1.2, Tight Circle x1.1, Marathon x1.5, Custom x0.5
-- Anti-farm: a match ending in round 1 pays a flat 5, no payout for a restart within 3 seconds, per-match cap 150
+- Anti-farm: a match ending in round 1 pays a flat 5, per-match cap 150, and only finished matches pay (quitting or restarting mid-match pays nothing)
 - Pace in Classic / Normal: a loss pays about 24, a win about 58, so roughly 35 per 3-minute match. A cheap item takes ~2 matches, an evening (~10 matches) is about 350 Shells
 - Paid once per match at the same point stats are recorded, and stored as `earned` on the match record
 
@@ -70,7 +70,7 @@ A Profile screen in the main menu is the player's identity and progress hub:
 `src/economy.ts` (pure `calcPayout`, mode table, anti-farm rules), `src/shop.ts` (data-driven catalog, pure `buy` / `equip`), `src/progress.ts` (versioned localStorage `last-chamber-progress`: shells, owned, equipped, name, later xp / level / achievements / daily state; same sanitize pattern as `stats.ts`), `src/cosmetics.ts` (equipped ids to render parameters, hooked into `characters.ts`, `effects.ts`, `arena.ts` / `theme.ts`), new `shop` and `profile` menu screens reusing the Stats panel and scroll patterns.
 
 #### Build phases
-1. **0.6.0 Shells, Shop and Profile:** wallet, payout, game-over payout panel, Shop and Locker with all five categories, Profile screen (name, title, loadout, stats link)
+1. **0.6.0 Shells, Shop and Profile (done):** wallet, payout, game-over payout panel, Shop and Locker with all five categories, Profile screen (name, title, loadout, stats link)
 2. **0.7.0 Level / XP and achievements:** level bar and frames, level-up rewards, achievements tab and badges
 3. **0.8.0 Dailies:** login streak and daily / weekly challenges
 4. **Later:** daily shop rotation, cylinder crates with visible odds (cosmetics only), casual-only power-ups, prestige levels, named bot rivals, share card, server-side validation with online multiplayer
@@ -88,4 +88,4 @@ A Profile screen in the main menu is the player's identity and progress hub:
 - Custom domain for the deployed game
 
 ## Done
-- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress
+- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress, 0.6.0 Shells, shop and profile
