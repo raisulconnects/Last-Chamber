@@ -50,6 +50,10 @@ There is no fire button. The skill is positioning, aiming and predicting where o
 | :---: | :---: |
 | <img src="docs/screenshots/hidden.png" alt="Hidden phase" width="380"> | <img src="docs/screenshots/reveal.png" alt="Reveal" width="380"> |
 
+| Shop | Shop (mobile) | Game over with Shells |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/shop.png" alt="Shop" width="300"> | <img src="docs/screenshots/shop-mobile.png" alt="Shop on mobile" width="150"> | <img src="docs/screenshots/game-over.png" alt="Game over with Shells earned" width="300"> |
+
 | Custom match | Mobile (portrait) | Mobile (landscape) |
 | :---: | :---: | :---: |
 | <img src="docs/screenshots/custom.png" alt="Custom match screen" width="300"> | <img src="docs/screenshots/mobile-portrait.png" alt="Mobile portrait" width="150"> | <img src="docs/screenshots/mobile-landscape.png" alt="Mobile landscape" width="300"> |
@@ -149,11 +153,13 @@ tests/                                    Vitest suites
 - Players outside the safe circle still fire; boundary and shot deaths apply together
 
 ## Testing
-`npm test` runs the Vitest suites covering ray misses and off-center hits, nearest-target selection, mutual and chain kills, array-order independence, safe-circle edge cases, draw and win outcomes, single resolution at the deadline, round-limit draws, restart, bot behavior, menu navigation, settings clamping, the changelog parser and touch-stick math.
+`npm test` runs the Vitest suites covering ray misses and off-center hits, nearest-target selection, mutual and chain kills, array-order independence, safe-circle edge cases, draw and win outcomes, single resolution at the deadline, round-limit draws, restart, bot behavior, menu navigation, settings clamping, the changelog parser, touch-stick math, local stats, Shell payouts, the shop catalog, buying and equipping, and saved progress.
 
 Mobile support has been verified with emulated touch in a headless browser, not yet on real devices.
 
 ## Roadmap
+- Player level, XP and achievements (phase 2 of the currency plan)
+- Daily login rewards and challenges
 - Online multiplayer (the `Command` model is designed for it)
 - Real-device mobile testing (iOS Safari fullscreen, notches, haptics)
 - Logo and final art pass
