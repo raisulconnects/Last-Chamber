@@ -24,6 +24,7 @@ Add an entry to `CHANGELOG.md` (shown in-game) and bump `version` in `package.js
 ## Controls
 - **WASD / Arrow keys**: move (diagonals are normalized)
 - **Mouse**: aim (no fire button; the shot fires automatically at the deadline)
+- **Touch (phones/tablets)**: left stick moves, right stick aims; tap MENU twice to quit; Full button for fullscreen. Portrait and landscape both work.
 - **Menu:** Up/Down (W/S) select, Left/Right (A/D) adjust, Enter confirm, Esc back, or use the mouse.
 - **In a match:** **R** restarts with the same mode, **Esc** returns to the menu. On the game-over screen use Enter / R to restart.
 - **M** or the Sound button: mute. The slider sets master volume (both are remembered in `localStorage`).
@@ -60,7 +61,7 @@ Opponents are drawn only in REVEAL/GAME_OVER; the hidden phase renders just your
 - Safe radius x0.85 per round, minimum 50, max 20 rounds (round limit with several survivors = draw)
 - Survivors keep position and aim between rounds; no collisions between players; one hit kills
 - Zero survivors = draw. Players outside the safe circle still fire; boundary and shot deaths apply together
-- Desktop keyboard + mouse only; no networking
+- No networking; mobile is verified by emulation only, not on real devices
 
 ## Tests
 `npm test` covers ray misses, off-center hits, nearest-target, mutual kills, chain kills, blocking by a doomed target, array-order independence, safe-circle inside/touching/outside, outside-circle shooters, draw/win outcomes, single resolution after the deadline, frozen state post-deadline, round-limit draw, restart clearing, and basic bot behavior.

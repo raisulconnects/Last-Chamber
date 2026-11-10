@@ -9,6 +9,8 @@ import { MenuModel } from './menu/menuModel';
 import type { MenuAction, MenuEnv } from './menu/menuModel';
 import { Renderer } from './render';
 import { DIFFICULTY, loadPrefs, savePrefs } from './settings';
+import { THEME } from './theme';
+import { ui } from './ui';
 import type { MatchSettings } from './settings';
 import type { Command } from './types';
 import { View } from './view';
@@ -21,6 +23,24 @@ const match = new Match();
 const brains = new Map<number, BotBrain>();
 const audio = new AudioManager();
 const detector = new GameEventDetector();
+
+// Track whether the player is using touch or mouse so the UI can adapt (hybrids switch live).
+window.addEventListener(
+  'pointerdown',
+  (e) => {
+    ui.touch = e.pointerType === 'touch';
+    if (e.pointerType === 'touch') suppressClick = false;
+  },
+  true,
+);
+window.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse') ui.touch = false;
+});
+let suppressClick = false; // set when a finger drag scrolled a menu, so the trailing click is ignored
+input.touch.exclude = (x, y) => {
+  const r = renderer.menuPill;
+  return !!r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+};
 
 const prefs = loadPrefs();
 renderer.reduceFlashing = prefs.reduceFlashing;
@@ -179,8 +199,40 @@ canvas.addEventListener('mousemove', (e) => {
   canvas.style.cursor = hit ? 'pointer' : 'default';
 });
 
+let menuDrag: { id: number; startY: number; startScroll: number; moved: boolean } | null = null;
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'touch' && inMenu()) menuDrag = { id: e.pointerId, startY: e.clientY, startScroll: menu.scroll, moved: false };
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!menuDrag || menuDrag.id !== e.pointerId) return;
+  const dy = e.clientY - menuDrag.startY;
+  if (Math.abs(dy) > 8) menuDrag.moved = true;
+  if (menuDrag.moved) menu.scroll = Math.max(0, Math.min(menu.maxScroll, menuDrag.startScroll - dy));
+});
+const endDrag = (e: PointerEvent): void => {
+  if (menuDrag && menuDrag.id === e.pointerId) {
+    suppressClick = menuDrag.moved;
+    menuDrag = null;
+  }
+};
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+let quitArmedAt = 0;
+
 canvas.addEventListener('click', (e) => {
   const p = canvasPoint(e);
+  if (suppressClick) {
+    suppressClick = false;
+    return;
+  }
+  // Touch MENU pill: first tap arms, second tap within 2.5s quits to the menu.
+  const pill = renderer.menuPill;
+  if (!inMenu() && pill && p.x >= pill.x && p.x <= pill.x + pill.w && p.y >= pill.y && p.y <= pill.y + pill.h) {
+    if (performance.now() - quitArmedAt < 2500) leaveToMenu();
+    else quitArmedAt = performance.now();
+    return;
+  }
   if (inMenu()) {
     audio.unlock();
     const hit = renderer.menu.hit(p.x, p.y);
@@ -211,7 +263,37 @@ canvas.addEventListener(
 );
 
 window.addEventListener('resize', () => renderer.resize());
+window.addEventListener('orientationchange', () => setTimeout(() => renderer.resize(), 200));
+window.visualViewport?.addEventListener('resize', () => renderer.resize());
 renderer.resize();
+
+// Fullscreen button: only shown where the browser supports it (not on iPhone Safari).
+const fsBtn = document.getElementById('fullscreen') as HTMLButtonElement | null;
+type FsDoc = Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => void };
+type FsEl = HTMLElement & { webkitRequestFullscreen?: () => void };
+if (fsBtn && (document.fullscreenEnabled || (document as FsDoc).webkitExitFullscreen)) {
+  fsBtn.hidden = false;
+  const syncFs = (): void => {
+    fsBtn.textContent = document.fullscreenElement || (document as FsDoc).webkitFullscreenElement ? 'Exit' : 'Full';
+    setTimeout(() => renderer.resize(), 150);
+  };
+  fsBtn.addEventListener('click', () => {
+    try {
+      const d = document as FsDoc;
+      if (document.fullscreenElement || d.webkitFullscreenElement) {
+        void (document.exitFullscreen?.() ?? d.webkitExitFullscreen?.());
+      } else {
+        const el = document.documentElement as FsEl;
+        void (el.requestFullscreen?.() ?? el.webkitRequestFullscreen?.());
+      }
+    } catch {
+      /* fullscreen is best-effort */
+    }
+    fsBtn.blur();
+  });
+  document.addEventListener('fullscreenchange', syncFs);
+  document.addEventListener('webkitfullscreenchange', syncFs);
+}
 
 // Fixed-step loop driven by simulation time. Frozen while the tab is hidden.
 const STEP = 1 / CONFIG.tickRate;
@@ -241,6 +323,11 @@ function frame(now: number): void {
     return;
   }
   canvas.style.cursor = 'crosshair';
+  const human = match.players.find((p) => p.isHuman);
+  input.touch.radius = THEME.touch.stickRadius * renderer.u;
+  input.touch.setEnabled(match.phase === 'HIDDEN' && !!human && human.alive);
+  renderer.touchSticks = input.touch.states();
+  renderer.quitArmed = performance.now() - quitArmedAt < 2500;
   while (acc >= STEP) {
     match.update(STEP, collectCommands(STEP));
     audio.handle(detector.update(match)); // events are emitted once per state change

@@ -7,7 +7,9 @@ import { buildRevealEffects, drawEliminations, drawRevealEffects, recoilAt, reve
 import type { RevealEffects } from './effects';
 import type { Match } from './match';
 import { THEME } from './theme';
+import type { StickState } from './touch';
 import type { Player, Vec2 } from './types';
+import { getDpr, isNarrow, ui } from './ui';
 import type { View } from './view';
 
 export interface Rect {
@@ -26,6 +28,12 @@ export class Renderer {
   readonly menu = new MenuView();
   /** Accessibility: skip the full-screen flash at the start of a reveal. */
   reduceFlashing = false;
+  /** Live touch sticks (from Input) and quit-confirmation state, set by main. */
+  touchSticks: { move: StickState | null; aim: StickState | null } = { move: null, aim: null };
+  quitArmed = false;
+  private cardBottom = 0;
+  /** Tappable MENU pill (touch only) in screen px. */
+  menuPill: Rect | null = null;
   private ctx: CanvasRenderingContext2D;
 
   // Cosmetic state only; never read by the simulation.
@@ -45,7 +53,7 @@ export class Renderer {
 
   /** Match canvas backing store to the CSS size and device pixel ratio. */
   resize(): void {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = getDpr();
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.canvas.width = Math.round(w * dpr);
@@ -56,7 +64,7 @@ export class Renderer {
 
   /** UI scale factor so text/panels stay readable across desktop window sizes. */
   get u(): number {
-    return Math.max(0.75, Math.min(1.5, Math.min(this.view.cssWidth, this.view.cssHeight) / 720));
+    return Math.max(ui.touch ? 0.85 : 0.75, Math.min(1.5, Math.min(this.view.cssWidth, this.view.cssHeight) / 720));
   }
 
   draw(match: Match): void {
@@ -72,6 +80,7 @@ export class Renderer {
     ctx.fillStyle = C.background;
     ctx.fillRect(0, 0, view.cssWidth, view.cssHeight);
     this.buttons = [];
+    this.menuPill = null;
 
     this.arena.draw(ctx, view, now, match.phase === 'HIDDEN' && match.timeLeft > match.settings.hiddenDuration - 1.2);
 
@@ -89,6 +98,7 @@ export class Renderer {
 
     this.drawPhaseFrame(match, now);
     this.drawHud(match, now);
+    this.drawTouchUi(match);
     if (match.phase === 'GAME_OVER') this.drawGameOver(match);
   }
 
@@ -215,6 +225,26 @@ export class Renderer {
     const u = this.u;
     const pad = 16 * u;
 
+    const narrow = isNarrow(view.cssWidth);
+    let cardBottom = pad;
+    if (narrow) {
+      // Compact card so it never collides with the centered timer ring on phones.
+      const cw = 112 * u;
+      const ch = 54 * u;
+      ctx.fillStyle = 'rgba(8, 10, 16, 0.72)';
+      this.roundRect(pad, pad, cw, ch, 10 * u);
+      ctx.fill();
+      ctx.textAlign = 'left';
+      ctx.fillStyle = C.textDim;
+      ctx.font = this.font(700, 10);
+      ctx.fillText('ROUND', pad + 10 * u, pad + 17 * u);
+      ctx.fillText('ALIVE', pad + 10 * u, pad + 42 * u);
+      ctx.fillStyle = C.text;
+      ctx.font = this.font(800, 15);
+      ctx.fillText(`${match.round}/${match.settings.maxRounds}`, pad + 52 * u, pad + 18 * u);
+      ctx.fillText(`${match.alivePlayers.length}/${match.players.length}`, pad + 52 * u, pad + 43 * u);
+      cardBottom = pad + ch;
+    } else {
     // Left info card: round + player status.
     const cardW = Math.max(190, 124 + match.players.length * 22) * u; // grows to fit up to 6 player dots
     const cardH = 92 * u;
@@ -250,6 +280,9 @@ export class Renderer {
       ctx.stroke();
       dx -= 22 * u;
     }
+    cardBottom = pad + cardH;
+    }
+    this.cardBottom = cardBottom;
 
     // Timer ring (top center)
     const cx = view.cssWidth / 2;
@@ -304,24 +337,84 @@ export class Renderer {
     if (human && !human.alive && match.phase !== 'GAME_OVER') {
       ctx.fillStyle = C.danger;
       ctx.font = this.font(800, 17);
-      ctx.fillText('You are eliminated - the bots play on   (R to restart)', cx, view.cssHeight - 22 * u);
+      ctx.fillText(ui.touch ? 'You are eliminated - the bots play on' : 'You are eliminated - the bots play on   (R to restart)', cx, view.cssHeight - 22 * u);
     } else if (hidden) {
       ctx.fillStyle = C.textDim;
       ctx.font = this.font(600, 14);
-      ctx.fillText('Finish inside the green circle. Your shot fires automatically at 0.', cx, view.cssHeight - 22 * u);
+      const hint = ui.touch
+        ? 'Left thumb: move   Right thumb: aim'
+        : narrow
+          ? 'Stay in the green circle. Shot fires at 0.'
+          : 'Finish inside the green circle. Your shot fires automatically at 0.';
+      ctx.fillText(hint, cx, view.cssHeight - 22 * u);
     }
+  }
+
+  /** Virtual sticks and the MENU pill. Own input only: nothing about opponents is shown. */
+  private drawTouchUi(match: Match): void {
+    if (!ui.touch) return;
+    const { ctx, view } = this;
+    const u = this.u;
+    const human = match.players.find((p) => p.isHuman);
+
+    // MENU pill (touch has no Esc). First tap arms it, second tap quits.
+    if (match.phase !== 'READY' && match.phase !== 'GAME_OVER') {
+      const w = (this.quitArmed ? 118 : 70) * u;
+      const h = 30 * u;
+      const x = 16 * u;
+      const y = this.cardBottom + 10 * u;
+      this.menuPill = { x, y, w, h };
+      ctx.fillStyle = this.quitArmed ? 'rgba(242,95,92,0.85)' : 'rgba(8,10,16,0.72)';
+      this.roundRect(x, y, w, h, h / 2);
+      ctx.fill();
+      ctx.fillStyle = this.quitArmed ? '#fff' : C.text;
+      ctx.font = this.font(800, 11);
+      ctx.textAlign = 'center';
+      ctx.fillText(this.quitArmed ? 'TAP TO QUIT' : 'MENU', x + w / 2, y + h / 2 + 4 * u);
+    }
+
+    if (match.phase !== 'HIDDEN' || !human || !human.alive) return;
+    const R = THEME.touch.stickRadius * u;
+    const drawStick = (st: StickState | null, ghost: Vec2, label: string): void => {
+      const base = st ? st.base : ghost;
+      ctx.save();
+      ctx.globalAlpha = st ? 0.9 : 0.32;
+      ctx.lineWidth = 3 * u;
+      ctx.strokeStyle = '#ffffff';
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.arc(base.x, base.y, R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      const k = st ? st.pos : base;
+      ctx.fillStyle = st ? C.hiddenAccent : 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(k.x, k.y, R * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      if (!st) {
+        ctx.fillStyle = '#fff';
+        ctx.font = this.font(800, 11);
+        ctx.textAlign = 'center';
+        ctx.fillText(label, base.x, base.y + R + 16 * u);
+      }
+      ctx.restore();
+    };
+    const y = view.cssHeight - R - 74 * u; // leaves room for the hint line under the ghost labels
+    drawStick(this.touchSticks.move, { x: view.cssWidth * 0.22, y }, 'MOVE');
+    drawStick(this.touchSticks.aim, { x: view.cssWidth * 0.78, y }, 'AIM');
   }
 
   private panel(
     lines: { text: string; font: string; color: string; gap: number }[],
     buttonDefs: { id: 'restart' | 'menu'; label: string; primary: boolean }[],
     accent: string,
-    beside = false,
+    layout: 'center' | 'beside' | 'below' = 'center',
   ): void {
+    const beside = layout === 'beside';
     const { ctx, view } = this;
     const u = this.u;
     let cx = view.cssWidth / 2;
-    const cy = view.cssHeight / 2;
+    let cy = view.cssHeight / 2;
     const totalH = lines.reduce((a, l) => a + l.gap * u, 0) + (beside ? 130 : 80) * u;
     let w = Math.min(600 * u, view.cssWidth - 32);
     if (beside) {
@@ -329,6 +422,11 @@ export class Renderer {
       const free = view.cssWidth / 2 - CONFIG.arenaRadius * view.scale;
       w = free - 28;
       cx = view.cssWidth - free / 2;
+    }
+    if (layout === 'below') {
+      // Portrait: sit in the free space under the arena so the final positions stay visible.
+      const arenaBottom = view.cssHeight / 2 + CONFIG.arenaRadius * view.scale;
+      cy = arenaBottom + (view.cssHeight - arenaBottom) / 2;
     }
     const top = cy - totalH / 2;
 
@@ -391,18 +489,20 @@ export class Renderer {
       sub = 'Round limit reached.';
     }
     // Enough room beside the arena? Then keep the final positions visible.
-    const beside = this.view.cssWidth / 2 - CONFIG.arenaRadius * this.view.scale >= 230 * this.u;
+    const sideFree = this.view.cssWidth / 2 - CONFIG.arenaRadius * this.view.scale;
+    const belowFree = this.view.cssHeight / 2 - CONFIG.arenaRadius * this.view.scale;
+    const layout: 'center' | 'beside' | 'below' = sideFree >= 230 * this.u ? 'beside' : belowFree >= 190 * this.u ? 'below' : 'center';
     this.panel(
       [
         { text: title, font: this.font(900, 44), color, gap: 48 },
         { text: sub, font: this.font(600, 16), color: '#b7c0cc', gap: 32 },
       ],
       [
-        { id: 'restart', label: 'RESTART (R)', primary: true },
-        { id: 'menu', label: 'MENU (Esc)', primary: false },
+        { id: 'restart', label: ui.touch ? 'RESTART' : 'RESTART (R)', primary: true },
+        { id: 'menu', label: ui.touch ? 'MENU' : 'MENU (Esc)', primary: false },
       ],
       color,
-      beside,
+      layout,
     );
   }
 }

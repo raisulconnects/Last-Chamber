@@ -4,6 +4,15 @@ All notable changes to Last Chamber. This file is shown in-game on the Changelog
 Format per release: `## [version] - YYYY-MM-DD - short title`, then `### Added` / `### Changed` / `### Fixed` lists.
 To release: bump `version` in `package.json` and add an entry at the top.
 
+## [0.4.0] - 2026-11-10 - Mobile support
+### Added
+- Touch controls: left virtual stick moves, right stick aims (the gun keeps its direction when released)
+- Works in portrait and landscape; compact HUD, stick overlays and a MENU button (tap twice to quit)
+- Fullscreen button where the browser supports it
+- Touch-friendly menus: larger targets, drag-to-scroll lists, no keyboard hints
+### Changed
+- Game rules, timings and bot behavior are unchanged
+
 ## [0.3.0] - 2026-11-10 - Menu and modes
 ### Added
 - Game renamed to Last Chamber, with a new starting menu over an animated arena

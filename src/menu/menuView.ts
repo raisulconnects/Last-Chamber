@@ -4,6 +4,7 @@ import { CHANGELOG } from '../changelog';
 import { CONFIG, PLAYER_STYLES } from '../config';
 import { CREDITS } from '../credits';
 import { THEME } from '../theme';
+import { isNarrow, ui } from '../ui';
 import { APP_NAME, APP_TAGLINE, APP_VERSION } from '../version';
 import { View } from '../view';
 import { HOWTO_PAGES } from './menuModel';
@@ -19,6 +20,8 @@ export interface Region {
   h: number;
   index: number;
   part: ClickPart;
+  /** When the item is inside a scrolling list, taps outside this vertical band do not count. */
+  clip?: { y0: number; y1: number };
 }
 
 const TITLES: Record<string, string> = {
@@ -63,10 +66,13 @@ const HOWTO_TEXT: { title: string; lines: string[] }[] = [
 export class MenuView {
   regions: Region[] = [];
   private mini = new View();
+  private clip: { y0: number; y1: number } | undefined;
+  private lastFocusKey = '';
 
   hit(x: number, y: number): Region | null {
     for (let i = this.regions.length - 1; i >= 0; i--) {
       const r = this.regions[i];
+      if (r.clip && (y < r.clip.y0 || y > r.clip.y1)) continue;
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r;
     }
     return null;
@@ -97,19 +103,30 @@ export class MenuView {
     ctx.fillRect(0, 0, W, H);
 
     const screen = model.screen;
+    const short = H < 520;
+    const split = short && W > H * 1.3 && (screen === 'main' || screen === 'play');
     let top: number;
-    if (screen === 'main' || screen === 'play') {
-      top = this.drawTitle(ctx, W, H, now, u, screen === 'main' ? 1 : 0.8);
+    let listCx = W / 2;
+    if (split) {
+      // Short landscape (phones): title on the left, menu on the right.
+      this.drawTitle(ctx, W, H, now, u, 0.8, W * 0.27, H * 0.36);
+      listCx = W * 0.73;
+      const n = model.items().length;
+      top = Math.max(72, (H - n * (50 + 10)) / 2); // below the top-right audio buttons
+    } else if (screen === 'main' || screen === 'play') {
+      top = this.drawTitle(ctx, W, H, now, u, screen === 'main' ? (short ? 0.6 : 1) : 0.8);
     } else {
-      this.text(ctx, TITLES[screen], W / 2, 62 * u, 900, 30 * u, C.text, 'center', 3 * u);
-      this.line(ctx, W / 2 - 40 * u, 76 * u, 80 * u, C.hiddenAccent);
-      top = 104 * u;
+      const narrow = isNarrow(W);
+      const ty = narrow ? 92 * u : short ? 38 * u : 62 * u;
+      this.text(ctx, TITLES[screen], W / 2, ty, 900, (short ? 22 : 30) * u, C.text, 'center', 3 * u);
+      this.line(ctx, W / 2 - 40 * u, ty + 14 * u, 80 * u, C.hiddenAccent);
+      top = narrow ? 128 * u : short ? 66 * u : 104 * u;
     }
 
     switch (screen) {
       case 'main':
       case 'play':
-        this.drawItems(ctx, model, W, top, 56 * u, 12 * u, u, H);
+        this.drawItems(ctx, model, W, top, 56 * u, 12 * u, u, H, listCx);
         break;
       case 'single':
         this.drawItems(ctx, model, W, top, 56 * u, 8 * u, u, H);
@@ -137,7 +154,7 @@ export class MenuView {
     // Footer: version and key hints.
     ctx.textBaseline = 'alphabetic';
     this.text(ctx, `v${APP_VERSION}`, 16 * u, H - 16 * u, 700, 12 * u, C.textDim, 'left');
-    this.text(ctx, 'Up/Down select   Left/Right adjust   Enter confirm   Esc back', W / 2, H - 16 * u, 600, 12 * u, C.textDim, 'center');
+    if (!ui.touch) this.text(ctx, 'Up/Down select   Left/Right adjust   Enter confirm   Esc back', W / 2, H - 16 * u, 600, 12 * u, C.textDim, 'center');
   }
 
   // ---- background decoration ------------------------------------------------------------
@@ -210,10 +227,19 @@ export class MenuView {
   // ---- title ------------------------------------------------------------------------------
 
   /** Revolver cylinder emblem + wordmark. Returns the y where menu items should start. */
-  private drawTitle(ctx: CanvasRenderingContext2D, W: number, H: number, now: number, u: number, scale: number): number {
+  private drawTitle(
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    now: number,
+    u: number,
+    scale: number,
+    cxOverride?: number,
+    cyOverride?: number,
+  ): number {
     const s = scale * u;
-    const cx = W / 2;
-    const cy = Math.max(70 * s + 12, H * 0.15) + (scale < 1 ? 0 : 0);
+    const cx = cxOverride ?? W / 2;
+    const cy = cyOverride ?? Math.max(70 * s + 12, H * 0.15);
     const R = 38 * s;
 
     ctx.save();
@@ -258,12 +284,19 @@ export class MenuView {
 
     // wordmark
     const ty = cy + R + 44 * s;
-    const fs = 46 * s;
+    let fs = 46 * s;
     ctx.save();
     ctx.font = `900 ${Math.round(fs)}px ${FONT}`;
     ctx.textAlign = 'center';
     const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
     c.letterSpacing = `${6 * s}px`;
+    const fitW = ctx.measureText(APP_NAME.toUpperCase()).width;
+    if (fitW > W - 32) {
+      const k = (W - 32) / fitW;
+      fs *= k;
+      ctx.font = `900 ${Math.round(fs)}px ${FONT}`;
+      c.letterSpacing = `${6 * s * k}px`;
+    }
     ctx.lineWidth = 6 * s;
     ctx.strokeStyle = 'rgba(0,0,0,0.75)';
     ctx.lineJoin = 'round';
@@ -291,21 +324,65 @@ export class MenuView {
     gap: number,
     u: number,
     H: number,
+    cx: number = W / 2,
   ): void {
     const items = model.items();
     const w = Math.min(460 * u, W - 32);
-    const x = (W - w) / 2;
-    // Compress if the window is short so everything stays on screen.
-    const need = items.length * (itemH + gap);
-    const avail = H - top - 40 * u;
-    const k = need > avail ? Math.max(0.7, avail / need) : 1;
-    const ih = itemH * k;
-    const ig = gap * k;
-    let y = top;
+    const x = cx - w / 2;
+    const bottom = H - (ui.touch ? 12 : 40 * u);
+    const avail = Math.max(60, bottom - top);
+
+    // Desktop: squeeze a little so lists fit. Touch: keep targets large and scroll instead.
+    let ih = itemH;
+    let ig = gap;
+    const need = items.length * (ih + ig) - ig;
+    if (!ui.touch && need > avail) {
+      const k = Math.max(0.7, avail / need);
+      ih *= k;
+      ig *= k;
+    }
+    if (ui.touch) {
+      ih = Math.max(ih, 48);
+      ig = Math.max(ig, 8);
+    }
+    const total = items.length * (ih + ig) - ig;
+    const scrollable = total > avail;
+    model.maxScroll = scrollable ? total - avail : 0;
+    model.scroll = Math.max(0, Math.min(model.maxScroll, model.scroll));
+
+    // Keep the keyboard-focused item visible when focus moves.
+    const key = model.screen + ':' + model.focus;
+    if (scrollable && key !== this.lastFocusKey) {
+      const itemTop = model.focus * (ih + ig);
+      if (itemTop < model.scroll) model.scroll = itemTop;
+      else if (itemTop + ih > model.scroll + avail) model.scroll = itemTop + ih - avail;
+      model.scroll = Math.max(0, Math.min(model.maxScroll, model.scroll));
+    }
+    this.lastFocusKey = key;
+
+    ctx.save();
+    if (scrollable) {
+      ctx.beginPath();
+      ctx.rect(x - 12, top - 6, w + 24, avail + 12);
+      ctx.clip();
+      this.clip = { y0: top - 6, y1: top + avail + 6 };
+    } else this.clip = undefined;
+    let y = top - (scrollable ? model.scroll : 0);
     items.forEach((it, i) => {
       this.drawItem(ctx, it, i, x, y, w, ih, u, i === model.focus);
       y += ih + ig;
     });
+    ctx.restore();
+    this.clip = undefined;
+
+    if (scrollable) {
+      // Slim scroll indicator.
+      const th = Math.max(28, (avail * avail) / total);
+      const tyy = top + (model.scroll / model.maxScroll) * (avail - th);
+      this.rr(ctx, x + w + 6, tyy, 4, th, 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fill();
+    }
   }
 
   private drawItem(
@@ -336,7 +413,7 @@ export class MenuView {
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
       ctx.stroke();
     }
-    this.regions.push({ x, y, w, h, index, part: 'main' });
+    this.regions.push({ x, y, w, h, index, part: 'main', clip: this.clip });
 
     const dark = it.primary;
     const labelColor = dark ? '#0b1117' : it.badge ? C.textDim : C.text;
@@ -364,7 +441,11 @@ export class MenuView {
       this.arrow(ctx, dec, -1, focused);
       this.arrow(ctx, inc, 1, focused);
       this.text(ctx, it.value ?? '', val.x + vw / 2, mid + 5.5 * u, 800, 15 * u, focused ? C.hiddenAccent : C.text, 'center');
-      this.regions.push({ ...dec, index, part: 'dec' }, { ...inc, index, part: 'inc' });
+      // Bigger tap zones for fingers: full row height and a little extra width.
+      const pad = ui.touch ? 10 : 0;
+      const fat = (r: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number } =>
+        ui.touch ? { x: r.x - pad, y, w: r.w + pad * 2, h } : r;
+      this.regions.push({ ...fat(dec), index, part: 'dec', clip: this.clip }, { ...fat(inc), index, part: 'inc', clip: this.clip });
     } else {
       this.text(ctx, it.label, x + 18 * u, mid + 5.5 * u, 700, 16 * u, labelColor, 'left');
       const on = it.value === 'ON';
@@ -396,7 +477,7 @@ export class MenuView {
     const idx = items.findIndex((i) => i.id === 'back');
     if (idx < 0) return;
     const w = 200 * u;
-    this.drawItem(ctx, items[idx], idx, (W - w) / 2, y, w, 46 * u, u, model.focus === idx);
+    this.drawItem(ctx, items[idx], idx, (W - w) / 2, y, w, Math.max(46 * u, ui.touch ? 48 : 0), u, model.focus === idx);
   }
 
   private drawMultiplayer(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number): void {
@@ -480,36 +561,38 @@ export class MenuView {
 
   private drawHowTo(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number, now: number): void {
     const page = model.howtoPage;
+    const stack = isNarrow(W);
     const w = Math.min(780 * u, W - 32);
     const x = (W - w) / 2;
-    const h = Math.min(300 * u, H - top - 130 * u);
+    const dSize = stack ? Math.min(w - 48, 190 * u) : Math.min(Math.min(300 * u, H - top - 130 * u) - 32 * u, 250 * u);
+    const h = stack ? dSize + 200 * u : Math.min(300 * u, H - top - 130 * u);
     this.rr(ctx, x, top, w, h, 16 * u);
     ctx.fillStyle = 'rgba(14, 18, 28, 0.86)';
     ctx.fill();
 
-    // Diagram (left) and text (right)
-    const dSize = Math.min(h - 32 * u, 250 * u);
-    const dx = x + 20 * u;
-    const dy = top + (h - dSize) / 2;
+    // Diagram and text: side by side normally, stacked on narrow screens.
+    const dx = stack ? x + (w - dSize) / 2 : x + 20 * u;
+    const dy = stack ? top + 16 * u : top + (h - dSize) / 2;
     this.drawDiagram(ctx, page, dx, dy, dSize, now);
 
-    const tx = dx + dSize + 28 * u;
-    const tw = x + w - tx - 20 * u;
-    let ty = top + 52 * u;
-    this.text(ctx, HOWTO_TEXT[page].title, tx, ty, 900, 21 * u, C.text, 'left');
+    const tx = stack ? x + 20 * u : dx + dSize + 28 * u;
+    const tw = stack ? w - 40 * u : x + w - tx - 20 * u;
+    let ty = stack ? dy + dSize + 34 * u : top + 52 * u;
+    this.text(ctx, HOWTO_TEXT[page].title, stack ? x + w / 2 : tx, ty, 900, (stack ? 18 : 21) * u, C.text, stack ? 'center' : 'left');
     ctx.font = `600 ${Math.round(15 * u)}px ${FONT}`;
     for (const l of HOWTO_TEXT[page].lines) {
-      ty += 14 * u;
+      ty += 10 * u;
       for (const ln of this.wrap(ctx, l, tw)) {
-        ty += 21 * u;
+        ty += 20 * u;
         this.text(ctx, ln, tx, ty, 600, 15 * u, '#c9d1dc', 'left');
       }
     }
 
     // Page arrows + dots
-    const ay = top + h + 24 * u;
-    const prev = { x: W / 2 - 110 * u, y: ay - 18 * u, w: 36 * u, h: 36 * u };
-    const next = { x: W / 2 + 74 * u, y: ay - 18 * u, w: 36 * u, h: 36 * u };
+    const ay = top + h + 28 * u;
+    const bs = (ui.touch ? 48 : 36) * u;
+    const prev = { x: W / 2 - 110 * u, y: ay - bs / 2, w: bs, h: bs };
+    const next = { x: W / 2 + 110 * u - bs, y: ay - bs / 2, w: bs, h: bs };
     this.arrow(ctx, prev, -1, page > 0);
     this.arrow(ctx, next, 1, page < HOWTO_PAGES - 1);
     this.regions.push({ ...prev, index: 0, part: 'dec' }, { ...next, index: 0, part: 'inc' });
@@ -519,7 +602,7 @@ export class MenuView {
       ctx.fillStyle = i === page ? C.hiddenAccent : 'rgba(255,255,255,0.25)';
       ctx.fill();
     }
-    this.backButton(ctx, model, W, ay + 36 * u, u);
+    this.backButton(ctx, model, W, ay + bs / 2 + 12 * u, u);
   }
 
   /** Small schematic diagrams reusing the character art. Not tied to any match. */

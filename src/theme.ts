@@ -37,6 +37,11 @@ export const THEME = {
     impactSeconds: 0.45,
     eliminationSeconds: 0.9,
   },
+  touch: {
+    stickRadius: 56, // px, base radius of a virtual stick
+    deadzone: 0.15,
+    snap: 0.85, // pushes beyond this fraction count as full speed
+  },
   audio: {
     defaultVolume: 0.6,
     /** Peak gain for a single shot; simultaneous shots are scaled by 1/sqrt(n). */

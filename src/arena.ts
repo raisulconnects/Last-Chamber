@@ -1,5 +1,6 @@
 import { CONFIG } from './config';
 import { THEME } from './theme';
+import { getDpr } from './ui';
 import type { View } from './view';
 
 /** Cheap deterministic hash for tile variation. */
@@ -56,7 +57,7 @@ export class ArenaRenderer {
   }
 
   private buildFloor(view: View): void {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = getDpr();
     const R = Math.round(CONFIG.arenaRadius * view.scale * dpr);
     const key = `${R}|${this.tiles.length}`;
     if (key === this.floorKey && this.floor) return;
