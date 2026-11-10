@@ -1,5 +1,8 @@
+import { AudioManager } from './audio';
+import { loadFloorTiles } from './assets';
 import { BotBrain } from './bot';
 import { CONFIG } from './config';
+import { GameEventDetector } from './events';
 import { Input } from './input';
 import { Match } from './match';
 import { Renderer } from './render';
@@ -12,6 +15,13 @@ const renderer = new Renderer(canvas, view);
 const input = new Input(canvas, view);
 const match = new Match();
 const brains = new Map<number, BotBrain>();
+const audio = new AudioManager();
+const detector = new GameEventDetector();
+
+// Floor art is optional: if loading fails the arena keeps a plain fill.
+void loadFloorTiles()
+  .then((tiles) => renderer.arena.setTiles(tiles))
+  .catch(() => undefined);
 
 match.onStart = () => {
   brains.clear();
@@ -23,7 +33,11 @@ match.onReveal = (info) => {
 };
 
 function startOrRestart(): void {
+  audio.unlock(); // user gesture: safe place to create/resume the AudioContext
+  audio.stopAll();
   match.start();
+  audio.click();
+  audio.handle(detector.matchStarted());
 }
 
 function collectCommands(dt: number): Map<number, Command> {
@@ -38,9 +52,43 @@ function collectCommands(dt: number): Map<number, Command> {
   return cmds;
 }
 
+// ---- audio controls (DOM) ---------------------------------------------------------------
+const muteBtn = document.getElementById('mute') as HTMLButtonElement | null;
+const volSlider = document.getElementById('volume') as HTMLInputElement | null;
+
+function syncAudioUi(): void {
+  if (muteBtn) {
+    muteBtn.textContent = audio.muted ? 'Sound: OFF' : 'Sound: ON';
+    muteBtn.setAttribute('aria-pressed', String(audio.muted));
+  }
+  if (volSlider) volSlider.value = String(Math.round(audio.volume * 100));
+}
+function toggleMute(): void {
+  audio.unlock();
+  audio.toggleMute();
+  if (!audio.muted) audio.click();
+  syncAudioUi();
+}
+muteBtn?.addEventListener('click', () => {
+  toggleMute();
+  muteBtn.blur(); // keep keyboard focus on the game
+});
+volSlider?.addEventListener('input', () => {
+  audio.unlock();
+  audio.setVolume(Number(volSlider.value) / 100);
+});
+volSlider?.addEventListener('change', () => {
+  audio.click();
+  volSlider.blur();
+});
+syncAudioUi();
+
 window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  const k = e.key.toLowerCase();
   if (e.key === 'Enter' && match.phase === 'READY') startOrRestart();
-  else if (e.key.toLowerCase() === 'r' && match.phase !== 'READY') startOrRestart();
+  else if (k === 'r' && match.phase !== 'READY') startOrRestart();
+  else if (k === 'm') toggleMute();
 });
 
 canvas.addEventListener('click', (e) => {
@@ -79,6 +127,7 @@ function frame(now: number): void {
 
   while (acc >= STEP) {
     match.update(STEP, collectCommands(STEP));
+    audio.handle(detector.update(match)); // events are emitted once per state change
     acc -= STEP;
   }
   renderer.draw(match);

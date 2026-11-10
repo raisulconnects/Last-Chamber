@@ -17,6 +17,7 @@ Requires Node 18+.
 - **WASD / Arrow keys**: move (diagonals are normalized)
 - **Mouse**: aim (no fire button; the shot fires automatically at the deadline)
 - **Enter** or Start button: begin. **R** or Restart button: restart at any time.
+- **M** or the Sound button: mute. The slider sets master volume (both are remembered in `localStorage`).
 
 ## Architecture (`src/`)
 | File | Role |
@@ -29,7 +30,12 @@ Requires Node 18+.
 | `match.ts` | State machine READY / HIDDEN / RESOLVE / REVEAL / GAME_OVER; fixed-step `update(dt, commands)` |
 | `bot.ts` | Bot decisions; only knows positions revealed in earlier rounds; outputs `Command`s |
 | `input.ts`, `view.ts` | Keyboard/mouse and world <-> screen transform (resize-safe) |
-| `render.ts`, `main.ts` | Canvas drawing/HUD, game loop with fixed timestep |
+| `render.ts`, `main.ts` | Canvas drawing/HUD/screens, game loop with fixed timestep |
+| `theme.ts` | Central visual + audio settings and asset references (no gameplay values) |
+| `characters.ts`, `arena.ts`, `effects.ts` | Procedural top-down characters, textured arena and shrink animation, reveal effects built only from the computed `ResolutionResult` |
+| `events.ts`, `audio.ts` | Once-only game events from match state; synthesized Web Audio sounds, mute/volume, volley loudness limiting |
+
+Visuals and audio are presentation only: they read match state but never change it. During HIDDEN only your own character is drawn (no opponents, shadows, particles, trails or remnants), and there are no positional or opponent-movement sounds. Reveal effects are discarded before the next hidden phase. See `CREDITS.md` for assets and placeholders.
 
 The simulation (`match`, `resolve`, `geometry`, `movement`, `bot`) has no DOM dependency. Everything that drives a player is a `Command`, so local input and bots could later be replaced by server-authoritative commands.
 
