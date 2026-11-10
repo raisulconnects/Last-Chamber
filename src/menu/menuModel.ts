@@ -1,5 +1,7 @@
 import { CLASSIC, PRESETS, cycleDifficulty, loadCustom, saveCustom, stepSetting } from '../settings';
 import type { MatchSettings } from '../settings';
+import { emptyStats } from '../stats';
+import type { StatsData } from '../stats';
 
 export type Screen =
   | 'main'
@@ -8,6 +10,7 @@ export type Screen =
   | 'custom'
   | 'multiplayer'
   | 'howto'
+  | 'stats'
   | 'settings'
   | 'credits'
   | 'changelog';
@@ -25,7 +28,8 @@ export type MenuAction =
   | { type: 'start'; settings: MatchSettings; modeName: string }
   | { type: 'setVolume'; value: number }
   | { type: 'toggleMute' }
-  | { type: 'setReduceFlashing'; value: boolean };
+  | { type: 'setReduceFlashing'; value: boolean }
+  | { type: 'resetStats' };
 
 export interface MenuItem {
   id: string;
@@ -52,6 +56,10 @@ export class MenuModel {
   scroll = 0;
   maxScroll = 0;
   custom: MatchSettings;
+  /** Latest stats, owned and updated by the app; the Stats screen only reads it. */
+  stats: StatsData = emptyStats();
+  /** True after the first tap on "Reset stats"; a second tap confirms. */
+  resetArmed = false;
   private stack: { screen: Screen; focus: number }[] = [];
 
   constructor(
@@ -69,6 +77,7 @@ export class MenuModel {
         return [
           { id: 'play', label: 'Play', kind: 'button', primary: true },
           { id: 'howto', label: 'How to Play', kind: 'button' },
+          { id: 'stats', label: 'Stats', kind: 'button' },
           { id: 'settings', label: 'Settings', kind: 'button' },
           { id: 'credits', label: 'Credits', kind: 'button' },
           { id: 'changelog', label: 'Changelog', kind: 'button' },
@@ -121,6 +130,11 @@ export class MenuModel {
           { id: 'flash', label: 'Reduce flashing', kind: 'toggle', value: this.env.reduceFlashing ? 'ON' : 'OFF' },
           back,
         ];
+      case 'stats':
+        return [
+          { id: 'resetStats', label: this.resetArmed ? 'Tap again to confirm' : 'Reset stats', kind: 'button' },
+          back,
+        ];
       case 'credits':
         return [back];
       case 'changelog':
@@ -138,6 +152,7 @@ export class MenuModel {
     this.focus = 0;
     this.scroll = 0;
     this.maxScroll = 0;
+    this.resetArmed = false;
     if (screen === 'howto') this.howtoPage = 0;
   }
 
@@ -149,10 +164,19 @@ export class MenuModel {
     }
     const n = this.items().length;
     this.focus = (this.focus + dir + n) % n;
+    this.resetArmed = false;
+  }
+
+  /** Scroll a scrollable screen (wheel / touch drag). */
+  scrollBy(delta: number): void {
+    this.scroll = Math.max(0, Math.min(this.maxScroll, this.scroll + delta));
   }
 
   hover(index: number): void {
-    if (index >= 0 && index < this.items().length) this.focus = index;
+    if (index >= 0 && index < this.items().length && index !== this.focus) {
+      this.focus = index;
+      this.resetArmed = false;
+    }
   }
 
   /** Left/right: change a stepper/toggle value, or flip How to Play pages. */
@@ -191,6 +215,16 @@ export class MenuModel {
         return null;
       case 'settings':
         this.go('settings');
+        return null;
+      case 'stats':
+        this.go('stats');
+        return null;
+      case 'resetStats':
+        if (this.resetArmed) {
+          this.resetArmed = false;
+          return { type: 'resetStats' };
+        }
+        this.resetArmed = true;
         return null;
       case 'credits':
         this.go('credits');
@@ -255,6 +289,7 @@ export class MenuModel {
     this.screen = prev.screen;
     this.focus = prev.focus;
     this.scroll = 0;
+    this.resetArmed = false;
     return true;
   }
 
@@ -264,5 +299,6 @@ export class MenuModel {
     this.screen = 'main';
     this.focus = 0;
     this.scroll = 0;
+    this.resetArmed = false;
   }
 }

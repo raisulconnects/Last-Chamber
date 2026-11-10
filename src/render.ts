@@ -31,6 +31,8 @@ export class Renderer {
   /** Live touch sticks (from Input) and quit-confirmation state, set by main. */
   touchSticks: { move: StickState | null; aim: StickState | null } = { move: null, aim: null };
   quitArmed = false;
+  /** Optional highlight line on the game-over panel (e.g. win streak); presentation only. */
+  gameOverNote: string | null = null;
   private cardBottom = 0;
   /** Tappable MENU pill (touch only) in screen px. */
   menuPill: Rect | null = null;
@@ -491,12 +493,15 @@ export class Renderer {
     // Enough room beside the arena? Then keep the final positions visible.
     const sideFree = this.view.cssWidth / 2 - CONFIG.arenaRadius * this.view.scale;
     const belowFree = this.view.cssHeight / 2 - CONFIG.arenaRadius * this.view.scale;
-    const layout: 'center' | 'beside' | 'below' = sideFree >= 230 * this.u ? 'beside' : belowFree >= 190 * this.u ? 'below' : 'center';
+    const layout: 'center' | 'beside' | 'below' =
+      sideFree >= 230 * this.u ? 'beside' : belowFree >= (this.gameOverNote ? 240 : 190) * this.u ? 'below' : 'center';
+    const lines = [
+      { text: title, font: this.font(900, 44), color, gap: 48 },
+      { text: sub, font: this.font(600, 16), color: '#b7c0cc', gap: 32 },
+    ];
+    if (this.gameOverNote) lines.push({ text: this.gameOverNote, font: this.font(800, 14), color: C.revealAccent, gap: 28 });
     this.panel(
-      [
-        { text: title, font: this.font(900, 44), color, gap: 48 },
-        { text: sub, font: this.font(600, 16), color: '#b7c0cc', gap: 32 },
-      ],
+      lines,
       [
         { id: 'restart', label: ui.touch ? 'RESTART' : 'RESTART (R)', primary: true },
         { id: 'menu', label: ui.touch ? 'MENU' : 'MENU (Esc)', primary: false },

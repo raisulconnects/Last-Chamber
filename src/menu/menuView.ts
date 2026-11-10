@@ -3,6 +3,7 @@ import { drawCharacter, drawShadow } from '../characters';
 import { CHANGELOG } from '../changelog';
 import { CONFIG, PLAYER_STYLES } from '../config';
 import { CREDITS } from '../credits';
+import { winRate } from '../stats';
 import { THEME } from '../theme';
 import { isNarrow, ui } from '../ui';
 import { APP_NAME, APP_TAGLINE, APP_VERSION } from '../version';
@@ -30,6 +31,7 @@ const TITLES: Record<string, string> = {
   custom: 'CUSTOM MATCH',
   multiplayer: 'MULTIPLAYER',
   howto: 'HOW TO PLAY',
+  stats: 'STATS',
   settings: 'SETTINGS',
   credits: 'CREDITS',
   changelog: 'CHANGELOG',
@@ -68,6 +70,7 @@ export class MenuView {
   private mini = new View();
   private clip: { y0: number; y1: number } | undefined;
   private lastFocusKey = '';
+  private statsContentH = 0; // measured last frame so the Stats panel can shrink to its content
 
   hit(x: number, y: number): Region | null {
     for (let i = this.regions.length - 1; i >= 0; i--) {
@@ -117,10 +120,10 @@ export class MenuView {
       top = this.drawTitle(ctx, W, H, now, u, screen === 'main' ? (short ? 0.6 : 1) : 0.8);
     } else {
       const narrow = isNarrow(W);
-      const ty = narrow ? 92 * u : short ? 38 * u : 62 * u;
+      const ty = narrow ? Math.max(92 * u, 100) : short ? 38 * u : 62 * u;
       this.text(ctx, TITLES[screen], W / 2, ty, 900, (short ? 22 : 30) * u, C.text, 'center', 3 * u);
       this.line(ctx, W / 2 - 40 * u, ty + 14 * u, 80 * u, C.hiddenAccent);
-      top = narrow ? 128 * u : short ? 66 * u : 104 * u;
+      top = narrow ? Math.max(128 * u, 138) : short ? 66 * u : 104 * u;
     }
 
     switch (screen) {
@@ -142,6 +145,9 @@ export class MenuView {
         break;
       case 'howto':
         this.drawHowTo(ctx, model, W, H, top, u, now);
+        break;
+      case 'stats':
+        this.drawStats(ctx, model, W, H, top, u);
         break;
       case 'credits':
         this.drawCredits(ctx, model, W, H, top, u);
@@ -515,6 +521,138 @@ export class MenuView {
       this.text(ctx, l, W / 2, y, 600, 14 * u, '#b7c0cc', 'center');
     }
     this.backButton(ctx, model, W, top + h + 18 * u, u);
+  }
+
+  private drawStats(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number): void {
+    const st = model.stats;
+    const w = Math.min(640 * u, W - 32);
+    const x = (W - w) / 2;
+    const btnH = Math.max(46 * u, ui.touch ? 48 : 0);
+    const avail = Math.max(120 * u, H - top - btnH - 56 * u);
+    const viewH = this.statsContentH > 0 ? Math.min(avail, Math.max(120 * u, this.statsContentH)) : avail;
+    this.rr(ctx, x, top, w, viewH, 16 * u);
+    ctx.fillStyle = 'rgba(14, 18, 28, 0.86)';
+    ctx.fill();
+
+    ctx.save();
+    this.rr(ctx, x, top, w, viewH, 16 * u);
+    ctx.clip();
+    const pad = 20 * u;
+    const innerW = w - pad * 2;
+    let y = top + pad - model.scroll;
+
+    if (st.played === 0) {
+      this.text(ctx, 'NO MATCHES YET', W / 2, y + 44 * u, 900, 20 * u, C.text, 'center', 2 * u);
+      this.text(ctx, 'Finish a match and your record shows up here.', W / 2, y + 74 * u, 600, 14 * u, C.textDim, 'center');
+      y += 100 * u;
+    } else {
+      // Summary tiles
+      const tiles: [string, string][] = [
+        ['MATCHES', String(st.played)],
+        ['WINS', String(st.wins)],
+        ['WIN RATE', `${winRate(st)}%`],
+        ['BEST STREAK', String(st.bestStreak)],
+        ['KILLS', String(st.kills)],
+        ['BEST SURVIVAL', `${st.bestSurvived} rds`],
+      ];
+      const cols = innerW < 420 * u ? 2 : 3;
+      const gap = 10 * u;
+      const tw = (innerW - gap * (cols - 1)) / cols;
+      const th = 58 * u;
+      tiles.forEach(([label, value], i) => {
+        const tx = x + pad + (i % cols) * (tw + gap);
+        const ty = y + Math.floor(i / cols) * (th + gap);
+        this.rr(ctx, tx, ty, tw, th, 10 * u);
+        ctx.fillStyle = 'rgba(255,255,255,0.05)';
+        ctx.fill();
+        this.text(ctx, value, tx + tw / 2, ty + 28 * u, 900, 22 * u, C.text, 'center');
+        this.text(ctx, label, tx + tw / 2, ty + 46 * u, 700, 10 * u, C.textDim, 'center', 1.5 * u);
+      });
+      y += Math.ceil(tiles.length / cols) * (th + gap) + 6 * u;
+      this.text(ctx, `Current streak: ${st.streak}   Losses: ${st.losses}   Draws: ${st.draws}`, x + pad, y + 14 * u, 600, 13 * u, '#b7c0cc', 'left');
+      y += 40 * u;
+
+      const right = x + w - pad;
+      const left = x + pad;
+      const divider = (yy: number): void => {
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(left, yy, innerW, 1);
+      };
+
+      // Results by mode: a small table with column headers.
+      this.text(ctx, 'RESULTS BY MODE', left, y, 800, 12 * u, C.text, 'left', 2 * u);
+      y += 18 * u;
+      const cW = 46 * u; // won / lost / draw columns
+      const cBest = right; // best-round column, right aligned
+      const cD = cBest - 56 * u;
+      const cL = cD - cW;
+      const cWin = cL - cW;
+      this.text(ctx, 'MODE', left, y, 700, 10 * u, C.textDim, 'left', 1.2 * u);
+      this.text(ctx, 'WON', cWin, y, 700, 10 * u, C.win, 'right', 0.5 * u);
+      this.text(ctx, 'LOST', cL, y, 700, 10 * u, C.danger, 'right', 0.5 * u);
+      this.text(ctx, 'DRAW', cD, y, 700, 10 * u, C.revealAccent, 'right', 0.5 * u);
+      this.text(ctx, 'BEST', cBest, y, 700, 10 * u, C.textDim, 'right', 1 * u);
+      y += 8 * u;
+      divider(y);
+      const modes = Object.entries(st.modes).sort((a2, b2) => b2[1].played - a2[1].played);
+      for (const [name, m] of modes) {
+        y += 26 * u;
+        this.text(ctx, name, left, y, 700, 14 * u, C.text, 'left');
+        this.text(ctx, String(m.wins), cWin, y, 800, 14 * u, m.wins ? C.win : C.textDim, 'right');
+        this.text(ctx, String(m.losses), cL, y, 800, 14 * u, m.losses ? C.danger : C.textDim, 'right');
+        this.text(ctx, String(m.draws), cD, y, 800, 14 * u, m.draws ? C.revealAccent : C.textDim, 'right');
+        this.text(ctx, String(m.bestSurvived), cBest, y, 800, 14 * u, C.text, 'right');
+      }
+      y += 36 * u;
+
+      // Last matches: newest first.
+      this.text(ctx, `LAST ${st.recent.length} MATCHES (NEWEST FIRST)`, left, y, 800, 12 * u, C.text, 'left', 2 * u);
+      y += 18 * u;
+      const rKills = right - 76 * u;
+      this.text(ctx, 'RESULT', left, y, 700, 10 * u, C.textDim, 'left', 1.2 * u);
+      this.text(ctx, 'MODE', left + 62 * u, y, 700, 10 * u, C.textDim, 'left', 1.2 * u);
+      this.text(ctx, 'KILLS', rKills, y, 700, 10 * u, C.textDim, 'right', 1.2 * u);
+      this.text(ctx, 'SURVIVED', right, y, 700, 10 * u, C.textDim, 'right', 1.2 * u);
+      y += 8 * u;
+      divider(y);
+      for (const r of st.recent) {
+        y += 28 * u;
+        const col = r.result === 'win' ? C.win : r.result === 'loss' ? C.danger : C.revealAccent;
+        this.rr(ctx, left, y - 15 * u, 52 * u, 22 * u, 11 * u);
+        ctx.fillStyle = col;
+        ctx.globalAlpha = 0.18;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        this.text(ctx, r.result === 'win' ? 'WIN' : r.result === 'loss' ? 'LOSS' : 'DRAW', left + 26 * u, y, 800, 11 * u, col, 'center', 1 * u);
+        this.text(ctx, r.mode, left + 62 * u, y, 700, 14 * u, C.text, 'left');
+        this.text(ctx, String(r.kills), rKills, y, 800, 14 * u, r.kills ? C.text : C.textDim, 'right');
+        this.text(ctx, `${r.survived} of ${r.rounds} rds`, right, y, 600, 13 * u, '#b7c0cc', 'right');
+      }
+      y += 4 * u;
+      this.text(ctx, 'BEST = most rounds you survived in that mode.', left, y + 22 * u, 600, 11 * u, C.textDim, 'left');
+      y += 24 * u;
+      y += 22 * u;
+    }
+    ctx.restore();
+
+    const total = y + model.scroll - top + pad;
+    this.statsContentH = total;
+    model.maxScroll = Math.max(0, total - viewH);
+    model.scroll = Math.max(0, Math.min(model.maxScroll, model.scroll));
+    if (model.maxScroll > 0) {
+      const th2 = Math.max(30 * u, (viewH * viewH) / total);
+      const ty2 = top + (model.scroll / model.maxScroll) * (viewH - th2);
+      this.rr(ctx, x + w - 8 * u, ty2, 4 * u, th2, 2 * u);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fill();
+    }
+
+    // Reset + Back side by side below the panel
+    const items = model.items();
+    const bw = Math.min(210 * u, (w - 12 * u) / 2);
+    const by = top + viewH + 16 * u;
+    this.drawItem(ctx, items[0], 0, W / 2 - bw - 6 * u, by, bw, btnH, u, model.focus === 0);
+    this.drawItem(ctx, items[1], 1, W / 2 + 6 * u, by, bw, btnH, u, model.focus === 1);
   }
 
   private drawChangelog(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number): void {

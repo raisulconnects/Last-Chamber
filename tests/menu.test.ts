@@ -99,12 +99,12 @@ describe('MenuModel', () => {
   it('back stack returns to the previous screen and focus; root back does nothing', () => {
     const m = newMenu();
     expect(m.back()).toBe(false);
-    m.hover(2);
+    m.hover(m.items().findIndex((i) => i.id === 'settings'));
     open(m, 'settings');
     expect(m.screen).toBe('settings');
     expect(m.back()).toBe(true);
     expect(m.screen).toBe('main');
-    expect(m.focus).toBe(2); // restored
+    expect(m.items()[m.focus].id).toBe('settings'); // restored
     expect(m.back()).toBe(false);
   });
 
@@ -197,7 +197,7 @@ describe('changelog parser', () => {
 
   it('the real CHANGELOG.md has entries, newest first', () => {
     expect(CHANGELOG.length).toBeGreaterThanOrEqual(3);
-    expect(CHANGELOG[0].version).toBe('0.4.0');
+    expect(CHANGELOG[0].version).toBe('0.5.0');
   });
 });
 

@@ -4,6 +4,14 @@ All notable changes to Last Chamber. This file is shown in-game on the Changelog
 Format per release: `## [version] - YYYY-MM-DD - short title`, then `### Added` / `### Changed` / `### Fixed` lists.
 To release: bump `version` in `package.json` and add an entry at the top.
 
+## [0.5.0] - 2026-11-10 - Stats and progress
+### Added
+- Stats screen in the main menu: matches, wins, win rate, streaks, kills, best survival, per-mode record and the last 10 matches
+- Game-over panel highlights win streaks and new personal bests
+- Stats are saved on this device only; "Reset stats" asks for a second tap to confirm
+### Changed
+- Game rules, timings and bot behavior are unchanged
+
 ## [0.4.0] - 2026-11-10 - Mobile support
 ### Added
 - Touch controls: left virtual stick moves, right stick aims (the gun keeps its direction when released)

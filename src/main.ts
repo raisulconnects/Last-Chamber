@@ -9,6 +9,7 @@ import { MenuModel } from './menu/menuModel';
 import type { MenuAction, MenuEnv } from './menu/menuModel';
 import { Renderer } from './render';
 import { DIFFICULTY, loadPrefs, savePrefs } from './settings';
+import { emptyStats, loadStats, recordMatch, saveStats } from './stats';
 import { THEME } from './theme';
 import { ui } from './ui';
 import type { MatchSettings } from './settings';
@@ -46,6 +47,13 @@ const prefs = loadPrefs();
 renderer.reduceFlashing = prefs.reduceFlashing;
 const env: MenuEnv = { volume: audio.volume, muted: audio.muted, reduceFlashing: prefs.reduceFlashing };
 const menu = new MenuModel(env);
+let stats = loadStats();
+menu.stats = stats;
+
+// Per-match tally for the human player, recorded once when the match ends.
+let currentMode = 'Classic';
+let tally = { kills: 0, diedRound: 0 };
+let recorded = false;
 
 // Floor art is optional: if loading fails the arena keeps a plain fill.
 void loadFloorTiles()
@@ -53,19 +61,26 @@ void loadFloorTiles()
   .catch(() => undefined);
 
 match.onStart = () => {
+  tally = { kills: 0, diedRound: 0 };
+  recorded = false;
+  renderer.gameOverNote = null;
   brains.clear();
   const profile = DIFFICULTY[match.settings.botDifficulty];
   for (const p of match.players) if (!p.isHuman) brains.set(p.id, new BotBrain(p.id, Math.random, profile));
   input.clearKeys();
 };
 match.onReveal = (info) => {
+  const me = match.humanId;
+  for (const s of info.result.shots) if (s.shooterId === me && s.targetId !== null && info.result.shotDeaths.includes(s.targetId)) tally.kills++;
+  if (tally.diedRound === 0 && info.result.deaths.includes(me)) tally.diedRound = info.round;
   for (const b of brains.values()) b.observe(info);
 };
 
 const inMenu = (): boolean => match.phase === 'READY';
 
 /** Start (or restart) a match. Without settings it reuses the last mode. */
-function startMatch(settings?: MatchSettings): void {
+function startMatch(settings?: MatchSettings, modeName?: string): void {
+  if (modeName) currentMode = modeName;
   audio.unlock(); // user gesture: safe place to create/resume the AudioContext
   audio.stopAll();
   match.start(settings);
@@ -91,6 +106,33 @@ function collectCommands(dt: number): Map<number, Command> {
     else cmds.set(p.id, brains.get(p.id)!.think({ pos: p.pos, radius: p.radius }, { safeRadius: match.safeRadius, progress }, dt));
   }
   return cmds;
+}
+
+/** Saves the finished match to the local stats (once) and sets the game-over highlight line. */
+function recordFinishedMatch(): void {
+  recorded = true;
+  const o = match.outcome;
+  if (!o) return;
+  const result = o.kind === 'draw' ? 'draw' : o.winnerId === match.humanId ? 'win' : 'loss';
+  const survived = tally.diedRound > 0 ? tally.diedRound - 1 : match.round; // rounds lived through
+  const r = recordMatch(stats, {
+    mode: currentMode,
+    bots: match.settings.botCount,
+    difficulty: match.settings.botDifficulty,
+    result,
+    rounds: match.round,
+    survived,
+    kills: tally.kills,
+    at: Date.now(),
+  });
+  stats = r.stats;
+  menu.stats = stats;
+  saveStats(stats);
+  const notes: string[] = [];
+  if (result === 'win' && stats.streak > 1) notes.push(`Win streak: ${stats.streak}`);
+  if (r.newBestStreak && stats.bestStreak > 1) notes.push('New best streak!');
+  if (r.newBestSurvived && stats.played > 1) notes.push('New best survival!');
+  renderer.gameOverNote = notes.length ? notes.join('  -  ') : null;
 }
 
 // ---- audio controls (DOM) + menu settings sync -----------------------------------------------
@@ -131,7 +173,12 @@ function applyMenuAction(a: MenuAction | null): void {
   if (!a) return;
   switch (a.type) {
     case 'start':
-      startMatch(a.settings);
+      startMatch(a.settings, a.modeName);
+      break;
+    case 'resetStats':
+      stats = emptyStats();
+      menu.stats = stats;
+      saveStats(stats);
       break;
     case 'setVolume':
       audio.unlock();
@@ -257,6 +304,9 @@ canvas.addEventListener(
     if (inMenu() && menu.screen === 'changelog') {
       menu.move(e.deltaY > 0 ? 1 : -1);
       e.preventDefault();
+    } else if (inMenu() && menu.screen === 'stats') {
+      menu.scrollBy(e.deltaY);
+      e.preventDefault();
     }
   },
   { passive: false },
@@ -333,6 +383,7 @@ function frame(now: number): void {
     audio.handle(detector.update(match)); // events are emitted once per state change
     acc -= STEP;
   }
+  if (match.phase === 'GAME_OVER' && !recorded) recordFinishedMatch();
   renderer.draw(match);
 }
 requestAnimationFrame(frame);
