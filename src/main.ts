@@ -5,7 +5,11 @@ import { CONFIG } from './config';
 import { GameEventDetector } from './events';
 import { Input } from './input';
 import { Match } from './match';
+import { MenuModel } from './menu/menuModel';
+import type { MenuAction, MenuEnv } from './menu/menuModel';
 import { Renderer } from './render';
+import { DIFFICULTY, loadPrefs, savePrefs } from './settings';
+import type { MatchSettings } from './settings';
 import type { Command } from './types';
 import { View } from './view';
 
@@ -18,6 +22,11 @@ const brains = new Map<number, BotBrain>();
 const audio = new AudioManager();
 const detector = new GameEventDetector();
 
+const prefs = loadPrefs();
+renderer.reduceFlashing = prefs.reduceFlashing;
+const env: MenuEnv = { volume: audio.volume, muted: audio.muted, reduceFlashing: prefs.reduceFlashing };
+const menu = new MenuModel(env);
+
 // Floor art is optional: if loading fails the arena keeps a plain fill.
 void loadFloorTiles()
   .then((tiles) => renderer.arena.setTiles(tiles))
@@ -25,25 +34,37 @@ void loadFloorTiles()
 
 match.onStart = () => {
   brains.clear();
-  for (const p of match.players) if (!p.isHuman) brains.set(p.id, new BotBrain(p.id));
+  const profile = DIFFICULTY[match.settings.botDifficulty];
+  for (const p of match.players) if (!p.isHuman) brains.set(p.id, new BotBrain(p.id, Math.random, profile));
   input.clearKeys();
 };
 match.onReveal = (info) => {
   for (const b of brains.values()) b.observe(info);
 };
 
-function startOrRestart(): void {
+const inMenu = (): boolean => match.phase === 'READY';
+
+/** Start (or restart) a match. Without settings it reuses the last mode. */
+function startMatch(settings?: MatchSettings): void {
   audio.unlock(); // user gesture: safe place to create/resume the AudioContext
   audio.stopAll();
-  match.start();
+  match.start(settings);
   audio.click();
   audio.handle(detector.matchStarted());
+}
+
+function leaveToMenu(): void {
+  audio.stopAll();
+  match.reset();
+  detector.reset();
+  menu.toMain();
+  input.clearKeys();
 }
 
 function collectCommands(dt: number): Map<number, Command> {
   const cmds = new Map<number, Command>();
   if (match.phase !== 'HIDDEN') return cmds;
-  const progress = 1 - match.timeLeft / CONFIG.hiddenDuration;
+  const progress = 1 - match.timeLeft / match.settings.hiddenDuration;
   for (const p of match.players) {
     if (!p.alive) continue;
     if (p.isHuman) cmds.set(p.id, input.command(p.pos));
@@ -52,11 +73,13 @@ function collectCommands(dt: number): Map<number, Command> {
   return cmds;
 }
 
-// ---- audio controls (DOM) ---------------------------------------------------------------
+// ---- audio controls (DOM) + menu settings sync -----------------------------------------------
 const muteBtn = document.getElementById('mute') as HTMLButtonElement | null;
 const volSlider = document.getElementById('volume') as HTMLInputElement | null;
 
 function syncAudioUi(): void {
+  env.volume = audio.volume;
+  env.muted = audio.muted;
   if (muteBtn) {
     muteBtn.textContent = audio.muted ? 'Sound: OFF' : 'Sound: ON';
     muteBtn.setAttribute('aria-pressed', String(audio.muted));
@@ -76,6 +99,7 @@ muteBtn?.addEventListener('click', () => {
 volSlider?.addEventListener('input', () => {
   audio.unlock();
   audio.setVolume(Number(volSlider.value) / 100);
+  syncAudioUi();
 });
 volSlider?.addEventListener('change', () => {
   audio.click();
@@ -83,22 +107,108 @@ volSlider?.addEventListener('change', () => {
 });
 syncAudioUi();
 
+function applyMenuAction(a: MenuAction | null): void {
+  if (!a) return;
+  switch (a.type) {
+    case 'start':
+      startMatch(a.settings);
+      break;
+    case 'setVolume':
+      audio.unlock();
+      audio.setVolume(a.value);
+      syncAudioUi();
+      break;
+    case 'toggleMute':
+      toggleMute();
+      break;
+    case 'setReduceFlashing':
+      prefs.reduceFlashing = a.value;
+      env.reduceFlashing = a.value;
+      renderer.reduceFlashing = a.value;
+      savePrefs(prefs);
+      break;
+  }
+}
+
+// ---- keyboard --------------------------------------------------------------------------------
 window.addEventListener('keydown', (e) => {
-  if (e.repeat) return;
+  if (e.repeat && e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
   const k = e.key.toLowerCase();
-  if (e.key === 'Enter' && match.phase === 'READY') startOrRestart();
-  else if (k === 'r' && match.phase !== 'READY') startOrRestart();
-  else if (k === 'm') toggleMute();
+  if (k === 'm' && !e.ctrlKey && !e.metaKey) {
+    toggleMute();
+    return;
+  }
+
+  if (inMenu()) {
+    audio.unlock();
+    let handled = true;
+    if (k === 'arrowup' || k === 'w') menu.move(-1);
+    else if (k === 'arrowdown' || k === 's') menu.move(1);
+    else if (k === 'arrowleft' || k === 'a') {
+      audio.click();
+      applyMenuAction(menu.adjust(-1));
+    } else if (k === 'arrowright' || k === 'd') {
+      audio.click();
+      applyMenuAction(menu.adjust(1));
+    } else if (k === 'enter' || k === ' ') {
+      audio.click();
+      applyMenuAction(menu.activate());
+    } else if (k === 'escape' || k === 'backspace') {
+      if (menu.back()) audio.click();
+    } else handled = false;
+    if (handled) e.preventDefault();
+    return;
+  }
+
+  // In a match
+  if (k === 'escape') leaveToMenu();
+  else if (k === 'r' || (k === 'enter' && match.phase === 'GAME_OVER')) startMatch();
+});
+
+// ---- mouse -----------------------------------------------------------------------------------
+function canvasPoint(e: MouseEvent): { x: number; y: number } {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!inMenu()) return;
+  const p = canvasPoint(e);
+  const hit = renderer.menu.hit(p.x, p.y);
+  if (hit) menu.hover(hit.index);
+  canvas.style.cursor = hit ? 'pointer' : 'default';
 });
 
 canvas.addEventListener('click', (e) => {
-  const b = renderer.button;
-  if (!b) return;
-  const r = canvas.getBoundingClientRect();
-  const x = e.clientX - r.left;
-  const y = e.clientY - r.top;
-  if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) startOrRestart();
+  const p = canvasPoint(e);
+  if (inMenu()) {
+    audio.unlock();
+    const hit = renderer.menu.hit(p.x, p.y);
+    if (!hit) return;
+    audio.click();
+    applyMenuAction(menu.clickItem(hit.index, hit.part));
+    return;
+  }
+  for (const b of renderer.buttons) {
+    const r = b.rect;
+    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+      if (b.id === 'restart') startMatch();
+      else leaveToMenu();
+      return;
+    }
+  }
 });
+
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    if (inMenu() && menu.screen === 'changelog') {
+      menu.move(e.deltaY > 0 ? 1 : -1);
+      e.preventDefault();
+    }
+  },
+  { passive: false },
+);
 
 window.addEventListener('resize', () => renderer.resize());
 renderer.resize();
@@ -125,6 +235,12 @@ function frame(now: number): void {
   acc += Math.min(MAX_FRAME, (now - last) / 1000);
   last = now;
 
+  if (inMenu()) {
+    acc = 0;
+    renderer.drawMenu(menu);
+    return;
+  }
+  canvas.style.cursor = 'crosshair';
   while (acc >= STEP) {
     match.update(STEP, collectCommands(STEP));
     audio.handle(detector.update(match)); // events are emitted once per state change

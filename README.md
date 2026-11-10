@@ -1,6 +1,6 @@
-# Hidden Shootout (browser prototype)
+# Last Chamber (browser prototype)
 
-Top-down elimination game: one human vs two bots in a circular arena. During a timed hidden phase you move and aim but cannot see opponents. At zero, everyone is revealed and fires one instant shot simultaneously. The safe circle shrinks every round; last survivor wins.
+Formerly "Hidden Shootout". Top-down elimination game: one human vs two bots in a circular arena. During a timed hidden phase you move and aim but cannot see opponents. At zero, everyone is revealed and fires one instant shot simultaneously. The safe circle shrinks every round; last survivor wins.
 
 ## Setup / run / test
 ```
@@ -13,10 +13,19 @@ Requires Node 18+.
 
 > `package.json` overrides `rollup` with `@rollup/wasm-node`. This avoids the native Rollup binary, which some locked-down Windows machines (Application Control policies) refuse to load. Remove the `overrides` block if you don't need it.
 
+## Menu and modes
+Play > Single Player offers **Classic** (the original rules), **Quick Draw**, **Crowded Arena**, **Tight Circle**, **Marathon**, and **Custom** (1-5 bots, hidden/reveal time, shrink speed, minimum circle, max rounds, bot difficulty; saved between sessions). Multiplayer shows "Coming soon". The menu also has How to Play, Settings (volume, sound, reduce flashing), Credits and a Changelog.
+
+Credits are set in `src/credits.ts` (name; optional role and links).
+
+## Versioning
+Add an entry to `CHANGELOG.md` (shown in-game) and bump `version` in `package.json` for each release.
+
 ## Controls
 - **WASD / Arrow keys**: move (diagonals are normalized)
 - **Mouse**: aim (no fire button; the shot fires automatically at the deadline)
-- **Enter** or Start button: begin. **R** or Restart button: restart at any time.
+- **Menu:** Up/Down (W/S) select, Left/Right (A/D) adjust, Enter confirm, Esc back, or use the mouse.
+- **In a match:** **R** restarts with the same mode, **Esc** returns to the menu. On the game-over screen use Enter / R to restart.
 - **M** or the Sound button: mute. The slider sets master volume (both are remembered in `localStorage`).
 
 ## Architecture (`src/`)
@@ -31,6 +40,9 @@ Requires Node 18+.
 | `bot.ts` | Bot decisions; only knows positions revealed in earlier rounds; outputs `Command`s |
 | `input.ts`, `view.ts` | Keyboard/mouse and world <-> screen transform (resize-safe) |
 | `render.ts`, `main.ts` | Canvas drawing/HUD/screens, game loop with fixed timestep |
+| `settings.ts` | Match settings, mode presets, Custom limits/clamping, bot difficulty profiles, saved preferences |
+| `menu/menuModel.ts`, `menu/menuView.ts` | Pure menu navigation state machine; canvas menu screens and mouse hit regions |
+| `changelog.ts`, `version.ts`, `credits.ts` | Changelog parser (reads `CHANGELOG.md`), app name/version, editable credits |
 | `theme.ts` | Central visual + audio settings and asset references (no gameplay values) |
 | `characters.ts`, `arena.ts`, `effects.ts` | Procedural top-down characters, textured arena and shrink animation, reveal effects built only from the computed `ResolutionResult` |
 | `events.ts`, `audio.ts` | Once-only game events from match state; synthesized Web Audio sounds, mute/volume, volley loudness limiting |
@@ -44,7 +56,7 @@ Deadline logic runs on simulation time: the last HIDDEN step is clipped to the d
 Opponents are drawn only in REVEAL/GAME_OVER; the hidden phase renders just your own player and the arena.
 
 ## Prototype defaults used (see `src/config.ts`)
-- 1 human + 2 bots; hidden 6 s, reveal 1.5 s; arena radius 320; player radius 12; speed 130/s
+- Classic mode: 1 human + 2 bots; hidden 6 s, reveal 1.5 s; arena radius 320; player radius 12; speed 130/s
 - Safe radius x0.85 per round, minimum 50, max 20 rounds (round limit with several survivors = draw)
 - Survivors keep position and aim between rounds; no collisions between players; one hit kills
 - Zero survivors = draw. Players outside the safe circle still fire; boundary and shot deaths apply together

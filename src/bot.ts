@@ -1,5 +1,7 @@
 import { CONFIG } from './config';
 import { dist, len } from './geometry';
+import { DIFFICULTY } from './settings';
+import type { BotProfile } from './settings';
 import type { Rng, RevealInfo } from './match';
 import type { Command, Vec2 } from './types';
 
@@ -33,6 +35,7 @@ export class BotBrain {
   constructor(
     readonly id: number,
     private rng: Rng = Math.random,
+    private profile: BotProfile = DIFFICULTY.normal,
   ) {}
 
   /** Call when a reveal happens. Only revealed (public) information enters memory. */
@@ -55,7 +58,7 @@ export class BotBrain {
 
   think(self: BotSelfView, round: BotRoundView, dt: number): Command {
     this.timer += dt;
-    if (this.timer >= CONFIG.bot.decisionInterval) {
+    if (this.timer >= this.profile.decisionInterval) {
       this.timer = 0;
       this.decide(self, round);
     }
@@ -93,11 +96,11 @@ export class BotBrain {
     // Aim: remembered location + uncertainty, otherwise exploratory random aim.
     const remembered = [...this.memory.values()];
     let angle: number;
-    if (remembered.length > 0 && this.rng() < CONFIG.bot.memoryAimChance) {
+    if (remembered.length > 0 && this.rng() < this.profile.memoryAimChance) {
       const t = remembered[Math.floor(this.rng() * remembered.length)];
       angle = Math.atan2(t.y - self.pos.y, t.x - self.pos.x);
       if (dist(t, self.pos) < 1e-6) angle = this.rng() * Math.PI * 2;
-      angle += gaussian(this.rng) * CONFIG.bot.aimNoise;
+      angle += gaussian(this.rng) * this.profile.aimNoise;
     } else {
       angle = this.rng() * Math.PI * 2;
     }

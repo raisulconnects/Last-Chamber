@@ -30,8 +30,8 @@ export function buildRevealEffects(result: ResolutionResult, snapshot: readonly 
 }
 
 /** Seconds since the reveal began. Purely cosmetic timing derived from the match timer. */
-export function revealElapsed(revealLeft: number): number {
-  return Math.max(0, CONFIG.revealDuration - revealLeft);
+export function revealElapsed(revealLeft: number, duration: number = CONFIG.revealDuration): number {
+  return Math.max(0, duration - revealLeft);
 }
 
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));

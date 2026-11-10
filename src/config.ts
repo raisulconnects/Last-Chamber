@@ -30,4 +30,7 @@ export const PLAYER_STYLES = [
   { name: 'You', color: '#4cc9f0' },
   { name: 'Red', color: '#f25f5c' },
   { name: 'Gold', color: '#ffe066' },
+  { name: 'Green', color: '#7bd88f' },
+  { name: 'Violet', color: '#b794f6' },
+  { name: 'Orange', color: '#ff9f43' },
 ] as const;

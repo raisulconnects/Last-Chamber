@@ -1,6 +1,8 @@
 import { ArenaRenderer } from './arena';
 import { drawCharacter, drawHumanMarker, drawNameTag, drawShadow } from './characters';
 import { CONFIG } from './config';
+import { MenuView } from './menu/menuView';
+import type { MenuModel } from './menu/menuModel';
 import { buildRevealEffects, drawEliminations, drawRevealEffects, recoilAt, revealElapsed } from './effects';
 import type { RevealEffects } from './effects';
 import type { Match } from './match';
@@ -18,9 +20,12 @@ export interface Rect {
 const C = THEME.colors;
 
 export class Renderer {
-  /** Clickable button rectangle (screen px) for the current overlay, if any. */
-  button: Rect | null = null;
+  /** Clickable buttons (screen px) for the current overlay. */
+  buttons: { id: 'restart' | 'menu'; rect: Rect }[] = [];
   readonly arena = new ArenaRenderer();
+  readonly menu = new MenuView();
+  /** Accessibility: skip the full-screen flash at the start of a reveal. */
+  reduceFlashing = false;
   private ctx: CanvasRenderingContext2D;
 
   // Cosmetic state only; never read by the simulation.
@@ -50,7 +55,7 @@ export class Renderer {
   }
 
   /** UI scale factor so text/panels stay readable across desktop window sizes. */
-  private get u(): number {
+  get u(): number {
     return Math.max(0.75, Math.min(1.5, Math.min(this.view.cssWidth, this.view.cssHeight) / 720));
   }
 
@@ -66,9 +71,9 @@ export class Renderer {
     // Background
     ctx.fillStyle = C.background;
     ctx.fillRect(0, 0, view.cssWidth, view.cssHeight);
-    this.button = null;
+    this.buttons = [];
 
-    this.arena.draw(ctx, view, now, match.phase === 'HIDDEN' && match.timeLeft > CONFIG.hiddenDuration - 1.2);
+    this.arena.draw(ctx, view, now, match.phase === 'HIDDEN' && match.timeLeft > match.settings.hiddenDuration - 1.2);
 
     if (match.phase === 'HIDDEN') {
       // Privacy rule: only the human is drawn (with their own shadow); nothing else.
@@ -84,8 +89,13 @@ export class Renderer {
 
     this.drawPhaseFrame(match, now);
     this.drawHud(match, now);
-    if (match.phase === 'READY') this.drawReady();
     if (match.phase === 'GAME_OVER') this.drawGameOver(match);
+  }
+
+  /** Draw the starting menu (no match is active). */
+  drawMenu(model: MenuModel): void {
+    this.lastNow = performance.now() / 1000;
+    this.menu.draw(this.ctx, this.view, this.arena, model, this.lastNow, this.u);
   }
 
   /** Build reveal effects once per resolution; discard them whenever a reveal is not on screen. */
@@ -130,7 +140,7 @@ export class Renderer {
     const { ctx, view } = this;
     const fx = this.fx;
     if (!fx) return;
-    const t = revealElapsed(match.revealLeft);
+    const t = revealElapsed(match.revealLeft, match.settings.revealDuration);
     const byId = new Map<number, Player>(match.players.map((p) => [p.id, p]));
     const dead = new Set(fx.eliminations.map((e) => e.id));
 
@@ -174,8 +184,8 @@ export class Renderer {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
     }
-    if (match.phase === 'REVEAL') {
-      const t = revealElapsed(match.revealLeft);
+    if (match.phase === 'REVEAL' && !this.reduceFlashing) {
+      const t = revealElapsed(match.revealLeft, match.settings.revealDuration);
       const a = Math.max(0, 1 - t / 0.16) * 0.35;
       if (a > 0) {
         ctx.fillStyle = `rgba(255, 243, 176, ${a})`;
@@ -206,7 +216,7 @@ export class Renderer {
     const pad = 16 * u;
 
     // Left info card: round + player status.
-    const cardW = 190 * u;
+    const cardW = Math.max(190, 124 + match.players.length * 22) * u; // grows to fit up to 6 player dots
     const cardH = 92 * u;
     ctx.fillStyle = 'rgba(8, 10, 16, 0.72)';
     this.roundRect(pad, pad, cardW, cardH, 12 * u);
@@ -221,7 +231,7 @@ export class Renderer {
     const rw = ctx.measureText(`${match.round}`).width;
     ctx.fillStyle = C.textDim;
     ctx.font = this.font(600, 13);
-    ctx.fillText(`/ ${CONFIG.maxRounds}`, pad + 20 * u + rw, pad + 50 * u);
+    ctx.fillText(`/ ${match.settings.maxRounds}`, pad + 20 * u + rw, pad + 50 * u);
 
     // Player status dots with alive count.
     const alive = match.alivePlayers.length;
@@ -246,7 +256,7 @@ export class Renderer {
     const r = 34 * u;
     const cy = pad + r + 4 * u;
     const hidden = match.phase === 'HIDDEN';
-    const frac = hidden ? match.timeLeft / CONFIG.hiddenDuration : match.phase === 'REVEAL' ? match.revealLeft / CONFIG.revealDuration : 0;
+    const frac = hidden ? match.timeLeft / match.settings.hiddenDuration : match.phase === 'REVEAL' ? match.revealLeft / match.settings.revealDuration : 0;
     const urgent = hidden && match.timeLeft <= 3;
     const accent = hidden ? (urgent ? C.danger : C.hiddenAccent) : C.revealAccent;
 
@@ -304,7 +314,7 @@ export class Renderer {
 
   private panel(
     lines: { text: string; font: string; color: string; gap: number }[],
-    buttonLabel: string,
+    buttonDefs: { id: 'restart' | 'menu'; label: string; primary: boolean }[],
     accent: string,
     beside = false,
   ): void {
@@ -312,7 +322,7 @@ export class Renderer {
     const u = this.u;
     let cx = view.cssWidth / 2;
     const cy = view.cssHeight / 2;
-    const totalH = lines.reduce((a, l) => a + l.gap * u, 0) + 80 * u;
+    const totalH = lines.reduce((a, l) => a + l.gap * u, 0) + (beside ? 130 : 80) * u;
     let w = Math.min(600 * u, view.cssWidth - 32);
     if (beside) {
       // Keep the final positions visible: use the free space to the right of the arena.
@@ -340,31 +350,25 @@ export class Renderer {
       ctx.fillText(l.text, cx, y);
     }
 
-    const bw = 190 * u;
-    const bh = 48 * u;
-    const by = y + 26 * u;
-    this.button = { x: cx - bw / 2, y: by, w: bw, h: bh };
-    ctx.fillStyle = accent;
-    this.roundRect(this.button.x, this.button.y, bw, bh, 12 * u);
-    ctx.fill();
-    ctx.fillStyle = '#0b1117';
-    ctx.font = this.font(800, 18);
-    ctx.fillText(buttonLabel, cx, by + 31 * u);
-  }
-
-  private drawReady(): void {
-    const t = this.font(600, 15);
-    this.panel(
-      [
-        { text: 'HIDDEN SHOOTOUT', font: this.font(900, 38), color: C.text, gap: 44 },
-        { text: 'Move and aim in secret - opponents are invisible.', font: t, color: '#b7c0cc', gap: 36 },
-        { text: 'At 0, everyone is revealed and fires one instant shot.', font: t, color: '#b7c0cc', gap: 24 },
-        { text: 'WASD / Arrows: move      Mouse: aim      M: mute', font: this.font(700, 15), color: C.text, gap: 36 },
-        { text: 'Finish every round inside the green circle. It shrinks.', font: t, color: C.win, gap: 26 },
-      ],
-      'START (Enter)',
-      C.hiddenAccent,
-    );
+    // Buttons: side by side normally, stacked when the panel is narrow.
+    const stacked = beside || w < 420 * u;
+    const bh = 46 * u;
+    const bw = stacked ? Math.min(220 * u, w - 32 * u) : (w - 48 * u - 12 * u * (buttonDefs.length - 1)) / buttonDefs.length;
+    let bx = stacked ? cx - bw / 2 : cx - w / 2 + 24 * u;
+    let by = y + 26 * u;
+    for (const b of buttonDefs) {
+      const rect = { x: bx, y: by, w: bw, h: bh };
+      this.buttons.push({ id: b.id, rect });
+      ctx.fillStyle = b.primary ? accent : 'rgba(255,255,255,0.12)';
+      this.roundRect(rect.x, rect.y, rect.w, rect.h, 12 * u);
+      ctx.fill();
+      ctx.fillStyle = b.primary ? '#0b1117' : C.text;
+      ctx.font = this.font(800, 16);
+      ctx.textAlign = 'center';
+      ctx.fillText(b.label, rect.x + rect.w / 2, rect.y + 29 * u);
+      if (stacked) by += bh + 10 * u;
+      else bx += bw + 12 * u;
+    }
   }
 
   private drawGameOver(match: Match): void {
@@ -393,7 +397,10 @@ export class Renderer {
         { text: title, font: this.font(900, 44), color, gap: 48 },
         { text: sub, font: this.font(600, 16), color: '#b7c0cc', gap: 32 },
       ],
-      'RESTART (R)',
+      [
+        { id: 'restart', label: 'RESTART (R)', primary: true },
+        { id: 'menu', label: 'MENU (Esc)', primary: false },
+      ],
       color,
       beside,
     );

@@ -1,4 +1,6 @@
 import { CONFIG, PLAYER_STYLES } from './config';
+import { CLASSIC } from './settings';
+import type { MatchSettings } from './settings';
 import { applyCommand } from './movement';
 import { dist } from './geometry';
 import { resolveRound } from './resolve';
@@ -20,6 +22,8 @@ export class Match {
   phase: Phase = 'READY';
   round = 0;
   safeRadius: number = CONFIG.arenaRadius;
+  /** Options for the current/last match; Classic unless a mode was chosen. */
+  settings: MatchSettings = CLASSIC;
   players: Player[] = [];
   timeLeft = 0; // seconds left in HIDDEN
   revealLeft = 0; // seconds left in REVEAL
@@ -45,7 +49,8 @@ export class Match {
   }
 
   /** READY/GAME_OVER -> HIDDEN with a completely fresh match state. */
-  start(): void {
+  start(settings: MatchSettings = this.settings): void {
+    this.settings = settings;
     this.round = 1;
     this.safeRadius = CONFIG.arenaRadius;
     this.snapshot = [];
@@ -95,7 +100,7 @@ export class Match {
 
   private beginHidden(): void {
     this.phase = 'HIDDEN';
-    this.timeLeft = CONFIG.hiddenDuration;
+    this.timeLeft = this.settings.hiddenDuration;
     this.result = null;
     this.snapshot = [];
   }
@@ -124,7 +129,7 @@ export class Match {
     for (const p of this.players) if (dead.has(p.id)) p.alive = false;
 
     this.phase = 'REVEAL';
-    this.revealLeft = CONFIG.revealDuration;
+    this.revealLeft = this.settings.revealDuration;
     this.onReveal?.({ snapshot: this.snapshot, result, round: this.round });
   }
 
@@ -134,10 +139,10 @@ export class Match {
       this.endGame({ kind: 'draw' });
     } else if (alive.length === 1) {
       this.endGame({ kind: 'win', winnerId: alive[0].id });
-    } else if (this.round >= CONFIG.maxRounds) {
+    } else if (this.round >= this.settings.maxRounds) {
       this.endGame({ kind: 'draw' });
     } else {
-      this.safeRadius = Math.max(CONFIG.minSafeRadius, this.safeRadius * CONFIG.safeRadiusMultiplier);
+      this.safeRadius = Math.max(this.settings.minSafeRadius, this.safeRadius * this.settings.safeRadiusMultiplier);
       this.round++;
       this.beginHidden(); // survivors keep positions and aim
     }
@@ -149,7 +154,7 @@ export class Match {
   }
 
   private spawnPlayers(): Player[] {
-    const total = CONFIG.humanCount + CONFIG.botCount;
+    const total = CONFIG.humanCount + this.settings.botCount;
     const maxR = CONFIG.arenaRadius - CONFIG.playerRadius - CONFIG.spawnMargin;
     const players: Player[] = [];
     for (let i = 0; i < total; i++) {
