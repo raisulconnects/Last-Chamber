@@ -6,6 +6,8 @@
 
 A fast, top-down elimination game for the browser. Move blind, aim blind, and trust your read of the arena. When the timer hits zero everyone is revealed and fires at once.
 
+### [Play now: lastchamber.netlify.app](https://lastchamber.netlify.app)
+
 ![Version](https://img.shields.io/badge/version-0.4.0-4cc9f0)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/built%20with-Vite-646cff?logo=vite&logoColor=white)
@@ -19,6 +21,7 @@ A fast, top-down elimination game for the browser. Move blind, aim blind, and tr
 ---
 
 ## Table of contents
+- [Play online](#play-online)
 - [How it plays](#how-it-plays)
 - [Screenshots](#screenshots)
 - [Game modes](#game-modes)
@@ -29,6 +32,9 @@ A fast, top-down elimination game for the browser. Move blind, aim blind, and tr
 - [Testing](#testing)
 - [Roadmap](#roadmap)
 - [Credits and license](#credits-and-license)
+
+## Play online
+The game is live at **[lastchamber.netlify.app](https://lastchamber.netlify.app)**. It runs in any modern desktop or mobile browser, with no install.
 
 ## How it plays
 1. **Hidden phase.** Every round you have a few seconds to move and aim. Opponents are invisible, and so are you to them.
