@@ -71,11 +71,50 @@ A Profile screen in the main menu is the player's identity and progress hub:
 
 #### Build phases
 1. **0.6.0 Shells, Shop and Profile (done):** wallet, payout, game-over payout panel, Shop and Locker with all five categories, Profile screen (name, title, loadout, stats link)
-2. **0.7.0 Level / XP and achievements:** level bar and frames, level-up rewards, achievements tab and badges
-3. **0.8.0 Dailies:** login streak and daily / weekly challenges
-4. **Later:** daily shop rotation, cylinder crates with visible odds (cosmetics only), casual-only power-ups, prestige levels, named bot rivals, share card, server-side validation with online multiplayer
+2. **Level / XP, achievements and dailies:** now built on top of player accounts (see "Player accounts and cloud profile": levels and XP arrive with the cloud economy, achievements and badges with the public layer; daily login streak and daily / weekly challenges follow)
+3. **Later:** daily shop rotation, cylinder crates with visible odds (cosmetics only), casual-only power-ups, prestige levels, named bot rivals, share card, server-side validation with online multiplayer
 
 **Guardrails:** no real-money purchases for now, no timers that punish absence, odds always shown, modes never locked.
+
+### Player accounts and cloud profile (designed, not built yet)
+Goal: real player accounts so Shells, items, level and stats follow the player across devices, plus public leaderboards. Guests can still play instantly with a local save; signing in uploads and merges it.
+
+**Backend: Supabase (free plan).** Hosted Postgres + Auth + Row Level Security + Realtime + Edge Functions.
+- Sign-in methods: **guest play and email + password first**. **Google and Discord login are deferred to a later phase** (both are supported by Supabase; Discord OAuth is free since a Discord developer application costs nothing)
+- Free-plan caveats (verify current limits on supabase.com/pricing): about 500 MB database, about 50k monthly active users, rate-limited built-in email (use custom SMTP later if needed), and free projects **pause after about a week of inactivity**
+- Considered and not chosen: Firebase (NoSQL makes leaderboards and server-side checks clumsy), Cloudflare D1 + Workers (we would hand-roll auth), PocketBase (needs self-hosting). Realtime can later help online multiplayer; Cloudflare Durable Objects stays an option for match rooms
+
+**Data we keep (needs an account)**
+- `profiles`: id (auth user id), unique display name, equipped loadout (skin, shot, kill, arena, title), Shells, total earned, XP, level, created_at, last_seen, optional settings (volume, reduce flashing, custom-mode settings)
+- `inventory`: owned item ids with acquired_at
+- `player_stats`: matches, wins, losses, draws, kills, current / best win streak, best survival, per-mode counters
+- `matches` (history, one row per finished match): mode, bots, difficulty, result, rounds, survived, kills, Shells and XP earned, played_at, client version
+- `achievements`: achievement id + unlocked_at
+- Later: `daily_state`, `challenges`, `ratings` (**ranks**: rating, tier and season per player), friends
+
+**Data we never keep:** passwords (Supabase Auth owns them), positions or per-frame data, raw input, anything about hidden opponent positions. Email stays in the auth schema, never in public tables.
+
+**Public (read-only through views):** display name, title, level, win / round stats, leaderboards, match history. Private: email, settings.
+
+**Security design**
+- The browser ships only the public anon key; **Row Level Security** on every table (read own rows, public data only through explicit views)
+- Money and progression are **never written directly by the client**. Security-definer Postgres functions (RPC) do the writes:
+  - `submit_match(summary)`: validates ranges, **recomputes the payout and XP** with the same formula as `src/economy.ts`, applies the per-match cap (150) and rate limits, and updates wallet, XP / level, stats, streak, history and achievements in one transaction
+  - `buy_item` / `equip_item`: price and ownership checked against a `shop_items` table seeded from `src/shop.ts`
+  - `set_display_name`: length / charset, uniqueness, simple profanity filter
+  - `import_local_progress`: one-time guest merge, capped and validated so forged localStorage gains little
+- Honest limit: matches are simulated in the browser, so a determined cheater can still submit fake wins. Caps and rate limits make that low-value; real authority arrives with server-run online matches
+- Generate the SQL catalog / formula constants from `src/shop.ts` and `src/economy.ts` with a script plus a parity test so client and server cannot drift
+
+**Client shape:** `src/cloud.ts` (Supabase client from `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`, set in Netlify and a local `.env`, never committed), `src/account.ts` (session, sign in / out), `src/sync.ts` (load profile, queue and flush match summaries, merge). Offline-first: the local save stays the source while signed out or offline; finished matches queue in localStorage and flush when online, and the server response replaces local Shells / XP / level. New menu screens: Account, Leaderboards, Match history; a "Sign in to save your progress" prompt on the game-over panel for guests.
+
+**Phases (each gets its own plan before coding)**
+1. **Foundation:** Supabase project, schema + RLS, auth (**email + password only**; guests stay local), profile row, display name, Account screen (sign up / sign in / sign out / password reset), guest-to-account merge
+2. **Cloud economy:** `submit_match`, buy / equip RPCs, cloud stats and match history, offline queue, XP and levels
+3. **Public layer:** leaderboards, public player profile, match history screen, achievements and badges
+4. **Later:** Google and Discord login (deferred), ranks (rating + seasons), daily rewards and challenges, friends, then online multiplayer on the same accounts
+
+**One-time manual steps when we build phase 1:** create a free Supabase project; enable the email provider (and decide whether email confirmation is required); add the Netlify site URL and `http://localhost:5199` to Supabase redirect URLs; set the two `VITE_` env vars in Netlify. When Google and Discord login are added later, create a Google OAuth client and a Discord application and enter their IDs / secrets in Supabase Auth providers. Secrets are never shared in chat or committed.
 
 ### Power-ups and new mechanics (changes gameplay)
 - Pickups, obstacles, alternative weapons or arena shapes
