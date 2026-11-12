@@ -16,6 +16,7 @@ export type Screen =
   | 'stats'
   | 'shop'
   | 'profile'
+  | 'account'
   | 'settings'
   | 'credits'
   | 'changelog';
@@ -36,7 +37,16 @@ export type MenuAction =
   | { type: 'setReduceFlashing'; value: boolean }
   | { type: 'resetStats' }
   | { type: 'saveProgress' }
-  | { type: 'rename' };
+  | { type: 'rename' }
+  | { type: 'openForm'; mode: 'signIn' | 'signUp' }
+  | { type: 'signOut' };
+
+/** What the Account screen shows; owned and updated by the app. */
+export interface AccountInfo {
+  status: 'unavailable' | 'loading' | 'guest' | 'signedIn';
+  email: string;
+  level: number;
+}
 
 export interface MenuItem {
   id: string;
@@ -72,6 +82,9 @@ export class MenuModel {
   shopTab = 0;
   /** An expensive item waiting for its confirming second tap. */
   armedId: string | null = null;
+  /** False when the build has no Supabase settings: the Account entries are then hidden. */
+  accountAvailable = false;
+  accountInfo: AccountInfo = { status: 'unavailable', email: '', level: 1 };
   /** Latest shop message; the view shows it briefly (seq changes on every new message). */
   toast: { text: string; kind: 'good' | 'bad' | 'info'; seq: number } = { text: '', kind: 'info', seq: 0 };
   private stack: { screen: Screen; focus: number }[] = [];
@@ -92,6 +105,7 @@ export class MenuModel {
           { id: 'play', label: 'Play', kind: 'button', primary: true },
           { id: 'shop', label: 'Shop', kind: 'button' },
           { id: 'profile', label: 'Profile', kind: 'button' },
+          ...(this.accountAvailable ? [{ id: 'account', label: 'Account', kind: 'button' } as MenuItem] : []),
           { id: 'stats', label: 'Stats', kind: 'button' },
           { id: 'howto', label: 'How to Play', kind: 'button' },
           { id: 'settings', label: 'Settings', kind: 'button' },
@@ -156,8 +170,25 @@ export class MenuModel {
           { id: 'rename', label: 'Change name', kind: 'button' },
           { id: 'goShop', label: 'Open Shop', kind: 'button' },
           { id: 'goStats', label: 'View Stats', kind: 'button' },
+          ...(this.accountAvailable ? [{ id: 'goAccount', label: 'Account', kind: 'button' } as MenuItem] : []),
           back,
         ];
+      case 'account':
+        if (this.accountInfo.status === 'signedIn') {
+          return [
+            { id: 'rename', label: 'Change display name', kind: 'button' },
+            { id: 'signOut', label: this.resetArmed ? 'Tap again to sign out' : 'Sign out', kind: 'button' },
+            back,
+          ];
+        }
+        if (this.accountInfo.status === 'guest') {
+          return [
+            { id: 'accSignIn', label: 'Sign in', kind: 'button', primary: true },
+            { id: 'accSignUp', label: 'Create account', kind: 'button' },
+            back,
+          ];
+        }
+        return [back];
       case 'stats':
         return [
           { id: 'resetStats', label: this.resetArmed ? 'Tap again to confirm' : 'Reset stats', kind: 'button' },
@@ -212,6 +243,11 @@ export class MenuModel {
 
   private say(text: string, kind: 'good' | 'bad' | 'info'): void {
     this.toast = { text, kind, seq: this.toast.seq + 1 };
+  }
+
+  /** Show a short message (used by the app after account actions). */
+  notify(text: string, kind: 'good' | 'bad' | 'info' = 'info'): void {
+    this.say(text, kind);
   }
 
   /** Switch the shop category tab (keyboard left/right or a tap on a tab). */
@@ -307,6 +343,21 @@ export class MenuModel {
         return null;
       case 'profile':
         this.go('profile');
+        return null;
+      case 'account':
+      case 'goAccount':
+        this.go('account');
+        return null;
+      case 'accSignIn':
+        return { type: 'openForm', mode: 'signIn' };
+      case 'accSignUp':
+        return { type: 'openForm', mode: 'signUp' };
+      case 'signOut':
+        if (this.resetArmed) {
+          this.resetArmed = false;
+          return { type: 'signOut' };
+        }
+        this.resetArmed = true;
         return null;
       case 'rename':
         return { type: 'rename' };

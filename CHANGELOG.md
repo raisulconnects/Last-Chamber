@@ -4,6 +4,16 @@ All notable changes to Last Chamber. This file is shown in-game on the Changelog
 Format per release: `## [version] - YYYY-MM-DD - short title`, then `### Added` / `### Changed` / `### Fixed` lists.
 To release: bump `version` in `package.json` and add an entry at the top.
 
+## [0.7.0] - 2026-11-13 - Player accounts
+### Added
+- Optional accounts: create an account or sign in with email and password (Menu > Account), with password reset
+- Your Shells, items, loadout and name from this device are saved to your account the first time you sign in
+- Choose a unique display name for your account
+- Sign-in hint on the game-over screen for guests
+### Changed
+- Playing as a guest works exactly as before. Ongoing sync of new matches and purchases to your account arrives in the next update; until then this device keeps your newest progress
+- Signing out starts a fresh guest save on that device (your account data stays online)
+
 ## [0.6.0] - 2026-11-10 - Shells, Shop and Profile
 ### Added
 - Shells: a currency earned by finishing matches (more for wins, kills, surviving rounds, harder modes and more bots)

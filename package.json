@@ -1,13 +1,14 @@
 {
   "name": "last-chamber",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "gen:sql": "vite-node scripts/gen-sql-seed.ts"
   },
   "overrides": {
     "rollup": "npm:@rollup/wasm-node@^4.24.0"
@@ -16,5 +17,8 @@
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.4"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0"
   }
 }

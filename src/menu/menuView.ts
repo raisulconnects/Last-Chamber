@@ -38,6 +38,7 @@ const TITLES: Record<string, string> = {
   stats: 'STATS',
   shop: 'SHOP',
   profile: 'PROFILE',
+  account: 'ACCOUNT',
   settings: 'SETTINGS',
   credits: 'CREDITS',
   changelog: 'CHANGELOG',
@@ -163,6 +164,9 @@ export class MenuView {
         break;
       case 'profile':
         this.drawProfile(ctx, model, W, H, top, u, now);
+        break;
+      case 'account':
+        this.drawAccount(ctx, model, W, H, top, u, now);
         break;
       case 'credits':
         this.drawCredits(ctx, model, W, H, top, u);
@@ -955,6 +959,76 @@ export class MenuView {
 
     const bw = Math.min(compact ? 130 * u : 220 * u, w);
     this.drawItem(ctx, items[n], n, compact ? x : (W - bw) / 2, backY, bw, btnH, u, model.focus === n);
+  }
+
+  private drawAccount(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number, now: number): void {
+    const info = model.accountInfo;
+    const p = model.progress;
+    const w = Math.min(460 * u, W - 32);
+    const x = (W - w) / 2;
+    const pad = 16 * u;
+    let head = '';
+    let sub = '';
+    let accent: string = C.hiddenAccent;
+    if (info.status === 'signedIn') {
+      head = p.name;
+      sub = this.maskEmail(info.email);
+      accent = C.win;
+    } else if (info.status === 'guest') {
+      head = 'GUEST';
+      sub = 'Playing on this device only. Sign in to save your Shells and items online.';
+    } else if (info.status === 'loading') {
+      head = 'CONNECTING...';
+      sub = 'Checking for a saved session.';
+    } else {
+      head = 'OFFLINE BUILD';
+      sub = 'Accounts are not set up in this version of the game.';
+      accent = C.textDim;
+    }
+    ctx.font = `600 ${Math.round(13 * u)}px ${FONT}`;
+    const lines = this.wrap(ctx, sub, w - pad * 2);
+    const lineH = 18 * u;
+    const ph = pad * 2 + 30 * u + lines.length * lineH + (info.status === 'signedIn' ? 22 * u : 0);
+    this.rr(ctx, x, top, w, ph, 14 * u);
+    ctx.fillStyle = 'rgba(14, 18, 28, 0.88)';
+    ctx.fill();
+    ctx.save();
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 8 * u * (1 + 0.3 * Math.sin(now * 2));
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+    this.text(ctx, head, x + pad, top + pad + 22 * u, 900, 22 * u, C.text, 'left', 1 * u);
+    let y = top + pad + 30 * u + 14 * u;
+    for (const ln of lines) {
+      this.text(ctx, ln, x + pad, y, 600, 13 * u, C.textDim, 'left');
+      y += lineH;
+    }
+    if (info.status === 'signedIn') this.text(ctx, `LEVEL ${info.level}`, x + pad, y + 6 * u, 800, 12 * u, accent, 'left', 1.5 * u);
+
+    // Latest message from an account action (fades after ~2.4s)
+    if (model.toast.seq !== this.toastSeen) {
+      this.toastSeen = model.toast.seq;
+      this.toastAt = now;
+    }
+    const age = now - this.toastAt;
+    let after = top + ph + 14 * u;
+    if (model.toast.text && age < 2.4) {
+      const col = model.toast.kind === 'good' ? C.win : model.toast.kind === 'bad' ? C.danger : C.revealAccent;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (2.4 - age) / 0.5);
+      this.text(ctx, model.toast.text, W / 2, after + 12 * u, 800, 13 * u, col, 'center');
+      ctx.restore();
+    }
+    after += 24 * u;
+    this.drawItems(ctx, model, W, after, 52 * u, 10 * u, u, H);
+  }
+
+  private maskEmail(e: string): string {
+    const at = e.indexOf('@');
+    if (at < 1) return e;
+    return e[0] + '***' + e.slice(at);
   }
 
   private drawProfile(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number, now: number): void {

@@ -47,6 +47,8 @@ export class Renderer {
   /** Equipped cosmetics and the latest match reward; presentation only. */
   loadout: Loadout = DEFAULT_LOADOUT;
   reward: RewardInfo | null = null;
+  /** True for guests when accounts exist: the game-over panel nudges them to sign in. */
+  signInHint = false;
   private cardBottom = 0;
   /** Tappable MENU pill (touch only) in screen px. */
   menuPill: Rect | null = null;
@@ -532,7 +534,7 @@ export class Renderer {
     const sideFree = this.view.cssWidth / 2 - CONFIG.arenaRadius * this.view.scale;
     const belowFree = this.view.cssHeight / 2 - CONFIG.arenaRadius * this.view.scale;
     const layout: 'center' | 'beside' | 'below' =
-      sideFree >= 230 * this.u ? 'beside' : belowFree >= (190 + (this.gameOverNote ? 50 : 0) + (this.reward ? 84 : 0)) * this.u ? 'below' : 'center';
+      sideFree >= 230 * this.u ? 'beside' : belowFree >= (190 + (this.gameOverNote ? 50 : 0) + (this.reward ? 84 + (this.signInHint ? 22 : 0) : 0)) * this.u ? 'below' : 'center';
     const lines: { text: string; font: string; color: string; gap: number; glow?: string }[] = [
       { text: title, font: this.font(900, 44), color, gap: 48 },
       { text: sub, font: this.font(600, 16), color: '#b7c0cc', gap: 32 },
@@ -551,6 +553,7 @@ export class Renderer {
       if (rw.parts.rounds) bits.push(`Rounds ${rw.parts.rounds}`);
       lines.push({ text: bits.join('  -  '), font: this.font(600, 12), color: '#9aa7b8', gap: 22 });
       lines.push({ text: rw.next ?? `Balance: ${rw.balance} Shells`, font: this.font(700, 12), color: rw.next ? '#c9d1dc' : '#9aa7b8', gap: 20 });
+      if (this.signInHint) lines.push({ text: 'Sign in (Menu > Account) to save your progress online', font: this.font(600, 11), color: '#6fb7d4', gap: 22 });
     }
     this.panel(
       lines,

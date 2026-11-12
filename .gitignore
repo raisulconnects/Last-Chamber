@@ -1,3 +1,8 @@
 node_modules
 dist
 *.log
+
+# Local environment (Supabase keys); .env.example is the template
+.env
+.env.*
+!.env.example

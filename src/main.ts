@@ -1,16 +1,20 @@
+import { Account } from './account';
+import { AccountForm } from './accountForm';
 import { AudioManager } from './audio';
 import { loadFloorTiles } from './assets';
 import { BotBrain } from './bot';
 import { CONFIG } from './config';
 import { loadoutOf } from './cosmetics';
+import { cloudEnabled } from './cloud';
 import { calcPayout } from './economy';
 import { GameEventDetector } from './events';
 import { Input } from './input';
 import { Match } from './match';
+import { applyCloudProfile } from './merge';
 import { MenuModel } from './menu/menuModel';
 import type { MenuAction, MenuEnv } from './menu/menuModel';
 import { Renderer } from './render';
-import { addShells, loadProgress, sanitizeName, saveProgress } from './progress';
+import { addShells, emptyProgress, loadProgress, sanitizeName, saveProgress } from './progress';
 import { DIFFICULTY, loadPrefs, savePrefs } from './settings';
 import { nextUnlock } from './shop';
 import { emptyStats, loadStats, recordMatch, saveStats } from './stats';
@@ -55,6 +59,40 @@ let stats = loadStats();
 menu.stats = stats;
 menu.progress = loadProgress();
 renderer.loadout = loadoutOf(menu.progress);
+
+// ---- accounts (only active when the build has Supabase settings) ------------------------------
+const account = new Account();
+menu.accountAvailable = cloudEnabled;
+const accountForm = new AccountForm(account, {
+  onDone: (message) => {
+    const prof = account.state.profile;
+    if (account.state.status === 'signedIn' && prof) {
+      menu.progress = { ...menu.progress, name: sanitizeName(prof.displayName) };
+      saveProgress(menu.progress);
+    }
+    menu.notify(message, 'good');
+  },
+  onClose: () => canvas.focus(),
+});
+function syncAccountUi(): void {
+  menu.accountInfo = { status: account.state.status, email: account.state.email, level: account.state.profile?.level ?? 1 };
+  renderer.signInHint = cloudEnabled && account.state.status === 'guest';
+}
+account.getLocal = () => menu.progress;
+account.onChange = syncAccountUi;
+account.onProfile = (cloud, sameAccount) => {
+  menu.progress = applyCloudProfile(menu.progress, cloud, sameAccount);
+  saveProgress(menu.progress);
+  renderer.loadout = loadoutOf(menu.progress);
+};
+account.onSignedOut = () => {
+  menu.progress = emptyProgress(); // the account's data lives in the cloud; this device starts a fresh guest save
+  saveProgress(menu.progress);
+  renderer.loadout = loadoutOf(menu.progress);
+};
+account.onRecovery = () => accountForm.open('newPassword');
+syncAccountUi();
+void account.init();
 
 // Per-match tally for the human player, recorded once when the match ends.
 let currentMode = 'Classic';
@@ -200,7 +238,17 @@ function applyMenuAction(a: MenuAction | null): void {
       saveProgress(menu.progress);
       renderer.loadout = loadoutOf(menu.progress);
       break;
+    case 'openForm':
+      accountForm.open(a.mode);
+      break;
+    case 'signOut':
+      void account.signOut().then(() => menu.notify('Signed out', 'info'));
+      break;
     case 'rename': {
+      if (account.state.status === 'signedIn') {
+        accountForm.open('rename');
+        break;
+      }
       const v = window.prompt('Your name (max 14 characters)', menu.progress.name);
       if (v !== null) {
         menu.progress = { ...menu.progress, name: sanitizeName(v) };

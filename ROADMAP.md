@@ -76,7 +76,7 @@ A Profile screen in the main menu is the player's identity and progress hub:
 
 **Guardrails:** no real-money purchases for now, no timers that punish absence, odds always shown, modes never locked.
 
-### Player accounts and cloud profile (designed, not built yet)
+### Player accounts and cloud profile (phase 1 built in 0.7.0)
 Goal: real player accounts so Shells, items, level and stats follow the player across devices, plus public leaderboards. Guests can still play instantly with a local save; signing in uploads and merges it.
 
 **Backend: Supabase (free plan).** Hosted Postgres + Auth + Row Level Security + Realtime + Edge Functions.
@@ -109,7 +109,7 @@ Goal: real player accounts so Shells, items, level and stats follow the player a
 **Client shape:** `src/cloud.ts` (Supabase client from `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`, set in Netlify and a local `.env`, never committed), `src/account.ts` (session, sign in / out), `src/sync.ts` (load profile, queue and flush match summaries, merge). Offline-first: the local save stays the source while signed out or offline; finished matches queue in localStorage and flush when online, and the server response replaces local Shells / XP / level. New menu screens: Account, Leaderboards, Match history; a "Sign in to save your progress" prompt on the game-over panel for guests.
 
 **Phases (each gets its own plan before coding)**
-1. **Foundation:** Supabase project, schema + RLS, auth (**email + password only**; guests stay local), profile row, display name, Account screen (sign up / sign in / sign out / password reset), guest-to-account merge
+1. **Foundation (done in 0.7.0):** Supabase project, schema + RLS, auth (**email + password only**; guests stay local), profile row, display name, Account screen (sign up / sign in / sign out / password reset), guest-to-account merge
 2. **Cloud economy:** `submit_match`, buy / equip RPCs, cloud stats and match history, offline queue, XP and levels
 3. **Public layer:** leaderboards, public player profile, match history screen, achievements and badges
 4. **Later:** Google and Discord login (deferred), ranks (rating + seasons), daily rewards and challenges, friends, then online multiplayer on the same accounts
@@ -127,4 +127,4 @@ Goal: real player accounts so Shells, items, level and stats follow the player a
 - Custom domain for the deployed game
 
 ## Done
-- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress, 0.6.0 Shells, shop and profile
+- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress, 0.6.0 Shells, shop and profile, 0.7.0 player accounts (email + password)

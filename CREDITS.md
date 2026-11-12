@@ -13,3 +13,6 @@
 - **All sound** is synthesized at runtime with the Web Audio API in `src/audio.ts`. There are no audio files.
 - **Characters, guns, muzzle flashes, tracers and impact effects** are drawn procedurally on the canvas (`src/characters.ts`, `src/effects.ts`).
 - Visual and audio tuning lives in `src/theme.ts`.
+
+## Services
+- **Supabase** (https://supabase.com): optional player accounts and database (Postgres, Auth). Loaded only when accounts are configured.
