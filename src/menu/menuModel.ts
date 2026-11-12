@@ -16,7 +16,6 @@ export type Screen =
   | 'stats'
   | 'shop'
   | 'profile'
-  | 'account'
   | 'settings'
   | 'credits'
   | 'changelog';
@@ -58,7 +57,7 @@ export interface MenuItem {
   primary?: boolean;
 }
 
-export type ClickPart = 'main' | 'dec' | 'inc' | 'tab';
+export type ClickPart = 'main' | 'dec' | 'inc' | 'tab' | 'card';
 
 const NUM_KEYS = ['botCount', 'hiddenDuration', 'revealDuration', 'safeRadiusMultiplier', 'minSafeRadius', 'maxRounds'] as const;
 type NumKey = (typeof NUM_KEYS)[number];
@@ -105,7 +104,6 @@ export class MenuModel {
           { id: 'play', label: 'Play', kind: 'button', primary: true },
           { id: 'shop', label: 'Shop', kind: 'button' },
           { id: 'profile', label: 'Profile', kind: 'button' },
-          ...(this.accountAvailable ? [{ id: 'account', label: 'Account', kind: 'button' } as MenuItem] : []),
           { id: 'stats', label: 'Stats', kind: 'button' },
           { id: 'howto', label: 'How to Play', kind: 'button' },
           { id: 'settings', label: 'Settings', kind: 'button' },
@@ -170,25 +168,13 @@ export class MenuModel {
           { id: 'rename', label: 'Change name', kind: 'button' },
           { id: 'goShop', label: 'Open Shop', kind: 'button' },
           { id: 'goStats', label: 'View Stats', kind: 'button' },
-          ...(this.accountAvailable ? [{ id: 'goAccount', label: 'Account', kind: 'button' } as MenuItem] : []),
+          ...(this.accountInfo.status === 'signedIn'
+            ? [{ id: 'signOut', label: this.resetArmed ? 'Tap again to sign out' : 'Sign out', kind: 'button' } as MenuItem]
+            : this.accountInfo.status === 'guest'
+              ? [{ id: 'accSignIn', label: 'Sign in / Sign up', kind: 'button' } as MenuItem]
+              : []),
           back,
         ];
-      case 'account':
-        if (this.accountInfo.status === 'signedIn') {
-          return [
-            { id: 'rename', label: 'Change display name', kind: 'button' },
-            { id: 'signOut', label: this.resetArmed ? 'Tap again to sign out' : 'Sign out', kind: 'button' },
-            back,
-          ];
-        }
-        if (this.accountInfo.status === 'guest') {
-          return [
-            { id: 'accSignIn', label: 'Sign in', kind: 'button', primary: true },
-            { id: 'accSignUp', label: 'Create account', kind: 'button' },
-            back,
-          ];
-        }
-        return [back];
       case 'stats':
         return [
           { id: 'resetStats', label: this.resetArmed ? 'Tap again to confirm' : 'Reset stats', kind: 'button' },
@@ -344,14 +330,8 @@ export class MenuModel {
       case 'profile':
         this.go('profile');
         return null;
-      case 'account':
-      case 'goAccount':
-        this.go('account');
-        return null;
       case 'accSignIn':
         return { type: 'openForm', mode: 'signIn' };
-      case 'accSignUp':
-        return { type: 'openForm', mode: 'signUp' };
       case 'signOut':
         if (this.resetArmed) {
           this.resetArmed = false;
@@ -414,12 +394,20 @@ export class MenuModel {
     return null;
   }
 
+  /** Tap on the player card (top-left): guests get the sign-in form, everyone else the Profile. */
+  private cardClick(): MenuAction | null {
+    if (this.accountAvailable && this.accountInfo.status === 'guest') return { type: 'openForm', mode: 'signIn' };
+    if (this.screen !== 'profile') this.go('profile');
+    return null;
+  }
+
   /** Mouse click on an item region (`dec`/`inc` are the arrow zones of steppers). */
   clickItem(index: number, part: ClickPart): MenuAction | null {
     if (part === 'tab') {
       this.setTab(index);
       return null;
     }
+    if (part === 'card') return this.cardClick();
     this.hover(index);
     if (part === 'dec') return this.adjust(-1);
     if (part === 'inc') return this.adjust(1);

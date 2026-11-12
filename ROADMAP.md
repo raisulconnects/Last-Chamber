@@ -127,4 +127,4 @@ Goal: real player accounts so Shells, items, level and stats follow the player a
 - Custom domain for the deployed game
 
 ## Done
-- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress, 0.6.0 Shells, shop and profile, 0.7.0 player accounts (email + password)
+- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress, 0.6.0 Shells, shop and profile, 0.7.0 player accounts (email + password), 0.7.1 player card

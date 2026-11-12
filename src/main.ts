@@ -323,7 +323,7 @@ canvas.addEventListener('mousemove', (e) => {
   if (!inMenu()) return;
   const p = canvasPoint(e);
   const hit = renderer.menu.hit(p.x, p.y);
-  if (hit && hit.part !== 'tab') menu.hover(hit.index);
+  if (hit && hit.part !== 'tab' && hit.part !== 'card') menu.hover(hit.index);
   canvas.style.cursor = hit ? 'pointer' : 'default';
 });
 

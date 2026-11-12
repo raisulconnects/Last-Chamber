@@ -35,36 +35,60 @@ describe('account validation', () => {
   });
 });
 
-describe('account menu', () => {
+describe('account menu and player card', () => {
   const env = { volume: 0.6, muted: false, reduceFlashing: false };
+  const toProfile = (m: MenuModel): void => {
+    m.focus = m.items().findIndex((i) => i.id === 'profile');
+    m.activate();
+  };
 
-  it('hides Account entries when accounts are unavailable', () => {
+  it('has no Account entry in the main list and no account actions without accounts', () => {
     const m = new MenuModel(env);
     expect(m.items().some((i) => i.id === 'account')).toBe(false);
+    m.accountAvailable = true;
+    expect(m.items().some((i) => i.id === 'account')).toBe(false);
+    m.accountAvailable = false;
+    toProfile(m);
+    expect(m.items().some((i) => i.id === 'accSignIn' || i.id === 'signOut')).toBe(false);
   });
 
-  it('guest sees sign in / create account, which open the form', () => {
+  it('guest: Profile offers Sign in, which opens the form', () => {
     const m = new MenuModel(env);
     m.accountAvailable = true;
     m.accountInfo = { status: 'guest', email: '', level: 1 };
-    m.focus = m.items().findIndex((i) => i.id === 'account');
-    expect(m.activate()).toBeNull();
-    expect(m.screen).toBe('account');
-    expect(m.items().map((i) => i.id)).toEqual(['accSignIn', 'accSignUp', 'back']);
+    toProfile(m);
+    m.focus = m.items().findIndex((i) => i.id === 'accSignIn');
+    expect(m.focus).toBeGreaterThan(-1);
     expect(m.activate()).toEqual({ type: 'openForm', mode: 'signIn' });
-    m.focus = 1;
-    expect(m.activate()).toEqual({ type: 'openForm', mode: 'signUp' });
   });
 
-  it('sign out needs a confirming second tap', () => {
+  it('signed in: Profile sign out needs a confirming second tap', () => {
     const m = new MenuModel(env);
     m.accountAvailable = true;
     m.accountInfo = { status: 'signedIn', email: 'a@b.co', level: 3 };
-    m.focus = m.items().findIndex((i) => i.id === 'account');
-    m.activate();
+    toProfile(m);
     m.focus = m.items().findIndex((i) => i.id === 'signOut');
     expect(m.activate()).toBeNull();
     expect(m.items()[m.focus].label).toMatch(/again/);
     expect(m.activate()).toEqual({ type: 'signOut' });
+  });
+
+  it('tapping the player card: guests get the sign-in form, signed-in players the Profile', () => {
+    const m = new MenuModel(env);
+    m.accountAvailable = true;
+    m.accountInfo = { status: 'guest', email: '', level: 1 };
+    expect(m.clickItem(-1, 'card')).toEqual({ type: 'openForm', mode: 'signIn' });
+    expect(m.screen).toBe('main');
+    m.accountInfo = { status: 'signedIn', email: 'a@b.co', level: 1 };
+    expect(m.clickItem(-1, 'card')).toBeNull();
+    expect(m.screen).toBe('profile');
+    m.clickItem(-1, 'card'); // already on Profile: stays put, no extra history
+    expect(m.screen).toBe('profile');
+  });
+
+  it('without accounts the card just opens the Profile', () => {
+    const m = new MenuModel(env);
+    expect(m.clickItem(-1, 'card')).toBeNull();
+    expect(m.screen).toBe('profile');
   });
 });

@@ -197,7 +197,7 @@ describe('changelog parser', () => {
 
   it('the real CHANGELOG.md has entries, newest first', () => {
     expect(CHANGELOG.length).toBeGreaterThanOrEqual(3);
-    expect(CHANGELOG[0].version).toBe('0.7.0');
+    expect(CHANGELOG[0].version).toBe('0.7.1');
   });
 });
 

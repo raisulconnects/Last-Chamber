@@ -8,7 +8,7 @@ A fast, top-down elimination game for the browser. Move blind, aim blind, and tr
 
 ### [Play now: lastchamber.netlify.app](https://lastchamber.netlify.app)
 
-![Version](https://img.shields.io/badge/version-0.7.0-4cc9f0)
+![Version](https://img.shields.io/badge/version-0.7.1-4cc9f0)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/built%20with-Vite-646cff?logo=vite&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-Vitest-6e9f18?logo=vitest&logoColor=white)
@@ -86,7 +86,7 @@ Finishing a match pays **Shells**: a base for playing, bonuses for a win, kills 
 Items come in Common, Rare, Epic and Legendary rarities; higher rarities glow and animate. Everything is saved on your device. See [ROADMAP.md](ROADMAP.md) for what comes next (levels, achievements, daily rewards).
 
 ## Accounts (optional)
-Menu > **Account** lets you create a free account with email and password. The first time you sign in, your Shells, items and name on that device are saved to the account; guests keep playing locally with no sign-up. Accounts run on [Supabase](https://supabase.com) (Postgres with Row Level Security). The browser only holds the public key and never writes balances directly; the server functions in `supabase/migrations/0001_foundation.sql` do. Ongoing sync of matches and purchases, leaderboards and ranks are on the [roadmap](ROADMAP.md).
+Tap your **player card** (top-left of the main menu) to create a free account with email and password; your Profile has Sign in / Sign out. The first time you sign in, your Shells, items and name on that device are saved to the account; guests keep playing locally with no sign-up. Accounts run on [Supabase](https://supabase.com) (Postgres with Row Level Security). The browser only holds the public key and never writes balances directly; the server functions in `supabase/migrations/0001_foundation.sql` do. Ongoing sync of matches and purchases, leaderboards and ranks are on the [roadmap](ROADMAP.md).
 
 Without Supabase settings the game runs unchanged and the Account entries are hidden. To enable accounts for your own copy:
 1. Create a free Supabase project and run `supabase/migrations/0001_foundation.sql` in its SQL editor.

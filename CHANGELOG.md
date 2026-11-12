@@ -4,6 +4,14 @@ All notable changes to Last Chamber. This file is shown in-game on the Changelog
 Format per release: `## [version] - YYYY-MM-DD - short title`, then `### Added` / `### Changed` / `### Fixed` lists.
 To release: bump `version` in `package.json` and add an entry at the top.
 
+## [0.7.1] - 2026-11-13 - Player card
+### Added
+- Player card in the top-left corner of the main menu: your avatar with its rarity glow, name, title and Shells. Guests see "Guest - tap to sign in"; signed-in players get a green online dot
+- Other screens show a compact version (avatar and Shells)
+### Changed
+- Account moved out of the main menu list: tap the player card, or use Sign in / Sign out on your Profile
+- Profile shows whether you are a guest or signed in
+
 ## [0.7.0] - 2026-11-13 - Player accounts
 ### Added
 - Optional accounts: create an account or sign in with email and password (Menu > Account), with password reset

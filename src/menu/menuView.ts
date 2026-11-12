@@ -13,6 +13,7 @@ import { isNarrow, ui } from '../ui';
 import { APP_NAME, APP_TAGLINE, APP_VERSION } from '../version';
 import { View } from '../view';
 import { HOWTO_PAGES } from './menuModel';
+import type { Progress } from '../progress';
 import type { ClickPart, MenuItem, MenuModel } from './menuModel';
 
 const C = THEME.colors;
@@ -38,7 +39,6 @@ const TITLES: Record<string, string> = {
   stats: 'STATS',
   shop: 'SHOP',
   profile: 'PROFILE',
-  account: 'ACCOUNT',
   settings: 'SETTINGS',
   credits: 'CREDITS',
   changelog: 'CHANGELOG',
@@ -165,9 +165,6 @@ export class MenuView {
       case 'profile':
         this.drawProfile(ctx, model, W, H, top, u, now);
         break;
-      case 'account':
-        this.drawAccount(ctx, model, W, H, top, u, now);
-        break;
       case 'credits':
         this.drawCredits(ctx, model, W, H, top, u);
         break;
@@ -176,7 +173,7 @@ export class MenuView {
         break;
     }
 
-    this.drawWallet(ctx, model.progress.shells, u, now);
+    this.drawPlayerCard(ctx, model, W, H, u, now);
 
     // Footer: version and key hints.
     ctx.textBaseline = 'alphabetic';
@@ -580,27 +577,121 @@ export class MenuView {
     ctx.restore();
   }
 
-  /** Wallet chip in the top-left corner (balance of Shells). */
-  private drawWallet(ctx: CanvasRenderingContext2D, shells: number, u: number, now: number): void {
-    const txt = this.fmt(shells);
-    ctx.font = `900 ${Math.round(15 * u)}px ${FONT}`;
-    const tw = ctx.measureText(txt).width;
-    const h = 34 * u;
-    const w = 44 * u + tw;
-    const x = 16 * u;
-    const y = 16 * u;
+  /** Rarity-glowing round avatar of the equipped skin. Used by the Profile and the player card. */
+  private drawAvatar(ctx: CanvasRenderingContext2D, ax: number, ay: number, av: number, p: Progress, now: number, u: number): void {
+    const skinItem = itemById(p.equipped.skin);
+    const skinR = RARITY[skinItem?.rarity ?? 'common'];
     ctx.save();
-    this.rr(ctx, x, y, w, h, h / 2);
-    ctx.fillStyle = 'rgba(14, 18, 28, 0.88)';
+    ctx.beginPath();
+    ctx.arc(ax + av / 2, ay + av / 2, av / 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(6, 8, 14, 0.85)';
+    ctx.shadowColor = skinR.rank > 0 ? skinR.color : 'rgba(255,255,255,0.3)';
+    ctx.shadowBlur = Math.max(6, skinR.glow) * u * (1 + skinR.pulse * Math.sin(now * 2.2));
     ctx.fill();
-    ctx.shadowColor = 'rgba(255,194,71,0.55)';
-    ctx.shadowBlur = 10;
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(255,194,71,0.65)';
+    ctx.lineWidth = Math.max(1.5, av * 0.04);
+    ctx.strokeStyle = skinR.rank > 0 ? skinR.color : 'rgba(255,255,255,0.35)';
     ctx.stroke();
     ctx.restore();
-    this.shellIcon(ctx, x + 19 * u, y + h / 2, 10 * u, now);
-    this.text(ctx, txt, x + 36 * u, y + h / 2 + 5.5 * u, 900, 15 * u, '#ffd479', 'left');
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ax + av / 2, ay + av / 2, av / 2 - 2, 0, Math.PI * 2);
+    ctx.clip();
+    const mv = this.mini;
+    mv.scale = (av * 0.25) / (CONFIG.playerRadius * THEME.art.characterScale);
+    mv.offsetX = ax + av / 2;
+    mv.offsetY = ay + av / 2;
+    mv.cssWidth = mv.cssHeight = av;
+    drawShadow(ctx, mv, { x: 0, y: 0 });
+    drawCharacter(ctx, mv, { x: 0, y: 0 }, { x: Math.cos(now * 0.6), y: Math.sin(now * 0.6) }, {
+      color: skinItem?.skin?.color ?? PLAYER_STYLES[0].color,
+      skin: skinItem?.skin,
+      name: p.name,
+      isHuman: false,
+      time: now,
+    });
+    ctx.restore();
+  }
+
+  /**
+   * Player card in the top-left corner. Full card (avatar, name, title or sign-in prompt, Shells) on the
+   * main menu when there is room; a compact chip (avatar + Shells) everywhere else. Tapping it is handled
+   * by MenuModel.clickItem(..., 'card'). A level badge and XP bar will go under the name once XP exists.
+   */
+  private drawPlayerCard(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, u: number, now: number): void {
+    const p = model.progress;
+    const info = model.accountInfo;
+    const full = model.screen === 'main' && W >= 720 && H >= 520;
+    const x = 16 * u;
+    const y = 16 * u;
+    const shellsTxt = this.fmt(p.shells);
+    ctx.font = `900 ${Math.round(15 * u)}px ${FONT}`;
+    const shellsW = ctx.measureText(shellsTxt).width;
+
+    let w: number;
+    let h: number;
+    let av: number;
+    let avX: number;
+    if (full) {
+      av = 52 * u;
+      h = 68 * u;
+      const titleItem = itemById(p.equipped.title);
+      const guestPrompt = model.accountAvailable && info.status === 'guest';
+      const sub = guestPrompt ? 'GUEST - TAP TO SIGN IN' : (titleItem?.title ?? 'Rookie').toUpperCase();
+      ctx.font = `900 ${Math.round(17 * u)}px ${FONT}`;
+      const nameW = ctx.measureText(p.name).width;
+      ctx.font = `800 ${Math.round(11 * u)}px ${FONT}`;
+      const subW = ctx.measureText(sub).width + sub.length * 1.5 * u;
+      avX = x + 8 * u;
+      w = 8 * u + av + 12 * u + Math.max(nameW, subW, 90 * u) + 22 * u + 24 * u + shellsW + 14 * u;
+      this.rr(ctx, x, y, w, h, 16 * u);
+      ctx.fillStyle = 'rgba(14, 18, 28, 0.9)';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.stroke();
+      const tx = avX + av + 12 * u;
+      this.text(ctx, p.name, tx, y + 28 * u, 900, 17 * u, C.text, 'left');
+      const titleR = RARITY[titleItem?.rarity ?? 'common'];
+      ctx.save();
+      if (!guestPrompt && titleR.rank > 0) {
+        ctx.shadowColor = titleR.color;
+        ctx.shadowBlur = titleR.glow * 0.5 * u;
+      }
+      this.text(ctx, sub, tx, y + 48 * u, 800, 11 * u, guestPrompt ? C.hiddenAccent : titleR.rank > 0 ? titleR.color : C.textDim, 'left', 1.5 * u);
+      ctx.restore();
+      this.shellIcon(ctx, x + w - 14 * u - shellsW - 12 * u, y + h / 2, 10 * u, now);
+      this.text(ctx, shellsTxt, x + w - 14 * u, y + h / 2 + 5.5 * u, 900, 15 * u, '#ffd479', 'right');
+    } else {
+      h = 36 * u;
+      av = 28 * u;
+      avX = x + 5 * u;
+      const iconCx = avX + av + 8 * u + 10 * u;
+      w = iconCx - x + 12 * u + shellsW + 14 * u;
+      this.rr(ctx, x, y, w, h, h / 2);
+      ctx.fillStyle = 'rgba(14, 18, 28, 0.88)';
+      ctx.fill();
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,194,71,0.55)';
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(255,194,71,0.65)';
+      ctx.stroke();
+      ctx.restore();
+      this.shellIcon(ctx, iconCx, y + h / 2, 10 * u, now);
+      this.text(ctx, shellsTxt, iconCx + 14 * u, y + h / 2 + 5.5 * u, 900, 15 * u, '#ffd479', 'left');
+    }
+    this.drawAvatar(ctx, avX, y + (h - av) / 2, av, p, now, u);
+    if (info.status === 'signedIn') {
+      const r = Math.max(3.5 * u, av * 0.1);
+      ctx.beginPath();
+      ctx.arc(avX + av * 0.86, y + (h - av) / 2 + av * 0.86, r, 0, Math.PI * 2);
+      ctx.fillStyle = C.win;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(6, 8, 14, 0.95)';
+      ctx.stroke();
+    }
+    this.regions.push({ x, y, w, h, index: -1, part: 'card' });
   }
 
   /** Border + glow + shimmer for a rarity. Draws the path in the current rr() shape. */
@@ -961,70 +1052,6 @@ export class MenuView {
     this.drawItem(ctx, items[n], n, compact ? x : (W - bw) / 2, backY, bw, btnH, u, model.focus === n);
   }
 
-  private drawAccount(ctx: CanvasRenderingContext2D, model: MenuModel, W: number, H: number, top: number, u: number, now: number): void {
-    const info = model.accountInfo;
-    const p = model.progress;
-    const w = Math.min(460 * u, W - 32);
-    const x = (W - w) / 2;
-    const pad = 16 * u;
-    let head = '';
-    let sub = '';
-    let accent: string = C.hiddenAccent;
-    if (info.status === 'signedIn') {
-      head = p.name;
-      sub = this.maskEmail(info.email);
-      accent = C.win;
-    } else if (info.status === 'guest') {
-      head = 'GUEST';
-      sub = 'Playing on this device only. Sign in to save your Shells and items online.';
-    } else if (info.status === 'loading') {
-      head = 'CONNECTING...';
-      sub = 'Checking for a saved session.';
-    } else {
-      head = 'OFFLINE BUILD';
-      sub = 'Accounts are not set up in this version of the game.';
-      accent = C.textDim;
-    }
-    ctx.font = `600 ${Math.round(13 * u)}px ${FONT}`;
-    const lines = this.wrap(ctx, sub, w - pad * 2);
-    const lineH = 18 * u;
-    const ph = pad * 2 + 30 * u + lines.length * lineH + (info.status === 'signedIn' ? 22 * u : 0);
-    this.rr(ctx, x, top, w, ph, 14 * u);
-    ctx.fillStyle = 'rgba(14, 18, 28, 0.88)';
-    ctx.fill();
-    ctx.save();
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 8 * u * (1 + 0.3 * Math.sin(now * 2));
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.restore();
-    this.text(ctx, head, x + pad, top + pad + 22 * u, 900, 22 * u, C.text, 'left', 1 * u);
-    let y = top + pad + 30 * u + 14 * u;
-    for (const ln of lines) {
-      this.text(ctx, ln, x + pad, y, 600, 13 * u, C.textDim, 'left');
-      y += lineH;
-    }
-    if (info.status === 'signedIn') this.text(ctx, `LEVEL ${info.level}`, x + pad, y + 6 * u, 800, 12 * u, accent, 'left', 1.5 * u);
-
-    // Latest message from an account action (fades after ~2.4s)
-    if (model.toast.seq !== this.toastSeen) {
-      this.toastSeen = model.toast.seq;
-      this.toastAt = now;
-    }
-    const age = now - this.toastAt;
-    let after = top + ph + 14 * u;
-    if (model.toast.text && age < 2.4) {
-      const col = model.toast.kind === 'good' ? C.win : model.toast.kind === 'bad' ? C.danger : C.revealAccent;
-      ctx.save();
-      ctx.globalAlpha = Math.min(1, (2.4 - age) / 0.5);
-      this.text(ctx, model.toast.text, W / 2, after + 12 * u, 800, 13 * u, col, 'center');
-      ctx.restore();
-    }
-    after += 24 * u;
-    this.drawItems(ctx, model, W, after, 52 * u, 10 * u, u, H);
-  }
-
   private maskEmail(e: string): string {
     const at = e.indexOf('@');
     if (at < 1) return e;
@@ -1038,7 +1065,8 @@ export class MenuView {
     const x = (W - w) / 2;
     const btnH = Math.max(46 * u, ui.touch ? 48 : 0);
     const gap = 10 * u;
-    const bottomH = btnH * 2 + gap;
+    const rows = Math.ceil(model.items().length / 2);
+    const bottomH = btnH * rows + gap * (rows - 1);
     const avail = Math.max(140 * u, H - top - bottomH - (ui.touch ? 28 : 64 * u));
     const viewH = this.profileContentH > 0 ? Math.min(avail, Math.max(140 * u, this.profileContentH)) : avail;
     this.rr(ctx, x, top, w, viewH, 16 * u);
@@ -1055,42 +1083,12 @@ export class MenuView {
     let y = top + pad - model.scroll;
 
     // Header: avatar with rarity glow, name, title, member since
-    const skinItem = itemById(p.equipped.skin);
     const titleItem = itemById(p.equipped.title);
-    const skinR = RARITY[skinItem?.rarity ?? 'common'];
     const titleR = RARITY[titleItem?.rarity ?? 'common'];
     const av = 74 * u;
     const ax = left;
     const ay = y;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(ax + av / 2, ay + av / 2, av / 2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(6, 8, 14, 0.85)';
-    ctx.shadowColor = skinR.rank > 0 ? skinR.color : 'rgba(255,255,255,0.3)';
-    ctx.shadowBlur = Math.max(6, skinR.glow) * u * (1 + skinR.pulse * Math.sin(now * 2.2));
-    ctx.fill();
-    ctx.lineWidth = 3 * u;
-    ctx.strokeStyle = skinR.rank > 0 ? skinR.color : 'rgba(255,255,255,0.35)';
-    ctx.stroke();
-    ctx.restore();
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(ax + av / 2, ay + av / 2, av / 2 - 2, 0, Math.PI * 2);
-    ctx.clip();
-    const mv = this.mini;
-    mv.scale = (av * 0.25) / (CONFIG.playerRadius * THEME.art.characterScale);
-    mv.offsetX = ax + av / 2;
-    mv.offsetY = ay + av / 2;
-    mv.cssWidth = mv.cssHeight = av;
-    drawShadow(ctx, mv, { x: 0, y: 0 });
-    drawCharacter(ctx, mv, { x: 0, y: 0 }, { x: Math.cos(now * 0.6), y: Math.sin(now * 0.6) }, {
-      color: skinItem?.skin?.color ?? PLAYER_STYLES[0].color,
-      skin: skinItem?.skin,
-      name: p.name,
-      isHuman: false,
-      time: now,
-    });
-    ctx.restore();
+    this.drawAvatar(ctx, ax, ay, av, p, now, u);
 
     const nx = ax + av + 16 * u;
     this.text(ctx, p.name, nx, ay + 28 * u, 900, 24 * u, C.text, 'left');
@@ -1103,7 +1101,18 @@ export class MenuView {
     ctx.restore();
     const since = new Date(p.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     this.text(ctx, `Playing since ${since}`, nx, ay + 68 * u, 600, 12 * u, C.textDim, 'left');
-    y += av + 22 * u;
+    y += av + 16 * u;
+
+    // Account status (only when accounts exist in this build)
+    if (model.accountAvailable && (model.accountInfo.status === 'guest' || model.accountInfo.status === 'signedIn')) {
+      const signed = model.accountInfo.status === 'signedIn';
+      const label = signed ? `SIGNED IN  -  ${this.maskEmail(model.accountInfo.email)}` : 'GUEST  -  saved on this device only';
+      this.rr(ctx, left, y, innerW, 28 * u, 9 * u);
+      ctx.fillStyle = signed ? 'rgba(93, 211, 158, 0.10)' : 'rgba(255,255,255,0.05)';
+      ctx.fill();
+      this.text(ctx, label, x + w / 2, y + 18.5 * u, 700, 11 * u, signed ? C.win : C.textDim, 'center', 1 * u);
+      y += 28 * u + 12 * u;
+    } else y += 6 * u;
 
     // Level / achievements teaser (arrives in the next update)
     this.rr(ctx, left, y, innerW, 40 * u, 10 * u);
