@@ -8,7 +8,7 @@ A fast, top-down elimination game for the browser. Move blind, aim blind, and tr
 
 ### [Play now: lastchamber.netlify.app](https://lastchamber.netlify.app)
 
-![Version](https://img.shields.io/badge/version-0.7.1-4cc9f0)
+![Version](https://img.shields.io/badge/version-0.8.0-4cc9f0)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/built%20with-Vite-646cff?logo=vite&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-Vitest-6e9f18?logo=vitest&logoColor=white)
@@ -86,13 +86,15 @@ Finishing a match pays **Shells**: a base for playing, bonuses for a win, kills 
 Items come in Common, Rare, Epic and Legendary rarities; higher rarities glow and animate. Everything is saved on your device. See [ROADMAP.md](ROADMAP.md) for what comes next (levels, achievements, daily rewards).
 
 ## Accounts (optional)
-Tap your **player card** (top-left of the main menu) to create a free account with email and password; your Profile has Sign in / Sign out. The first time you sign in, your Shells, items and name on that device are saved to the account; guests keep playing locally with no sign-up. Accounts run on [Supabase](https://supabase.com) (Postgres with Row Level Security). The browser only holds the public key and never writes balances directly; the server functions in `supabase/migrations/0001_foundation.sql` do. Ongoing sync of matches and purchases, leaderboards and ranks are on the [roadmap](ROADMAP.md).
+Tap your **player card** (top-left of the main menu) to create a free account with email and password; your Profile has Sign in / Sign out. The first time you sign in, your Shells, items and name on that device are saved to the account; guests keep playing locally with no sign-up. Accounts run on [Supabase](https://supabase.com) (Postgres with Row Level Security). The browser only holds the public key and never writes balances directly; the server functions in `supabase/migrations/` do.
+
+**Cloud economy, XP and levels (0.8.0).** Signed in, the server recomputes every match payout (the browser only sends a match summary), checks shop purchases, and keeps your stats and recent matches. Every match earns XP; level n to n+1 needs `100 + 40n` XP, leaving level n pays `25 + 5n` Shells, and the cap is level 100. Guests level up locally and keep their level on first sign-in (the server clamps it). Matches played offline queue in the browser (up to 50) and are sent when you are online again. The server rejects implausible matches and limits payouts to 60 matches per hour and 3000 Shells per day. Leaderboards and ranks are on the [roadmap](ROADMAP.md).
 
 Without Supabase settings the game runs unchanged and the Account entries are hidden. To enable accounts for your own copy:
-1. Create a free Supabase project and run `supabase/migrations/0001_foundation.sql` in its SQL editor.
+1. Create a free Supabase project and run `supabase/migrations/0001_foundation.sql` and then `0002_cloud_economy.sql` in its SQL editor.
 2. In Authentication > Providers > Email, keep email enabled (turn "Confirm email" off for easy testing). In URL Configuration, add your site URL and `http://localhost:5199`.
 3. Copy `.env.example` to `.env` and fill `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (also set them in your host's environment variables).
-4. After changing the shop catalog, run `npm run gen:sql` to refresh the SQL seed (a test checks they match).
+4. After changing the shop catalog, or the economy numbers (`src/economy.ts`, `src/levels.ts`), run `npm run gen:sql` to refresh the generated SQL blocks (a test checks they match). `node scripts/db-parity.cjs <url> <key> --light` is a manual check of the live database (it creates throwaway accounts).
 
 ## Controls
 
@@ -126,7 +128,8 @@ npm run preview  # serve the production build locally
 
 ```
 src/
-  config.ts  account.ts  accountForm.ts  accountValidate.ts  cloud.ts  merge.ts   accounts (Supabase, optional)
+  config.ts  account.ts  accountForm.ts  accountValidate.ts  cloud.ts  merge.ts  sync.ts   accounts (Supabase, optional)
+  levels.ts                               XP and level rules
   settings.ts  stats.ts  economy.ts  shop.ts  progress.ts  cosmetics.ts  types.ts        tuning values, match presets, shared types
   geometry.ts  resolve.ts  movement.ts    pure simulation rules
   match.ts  bot.ts                        state machine and bot AI
@@ -146,7 +149,8 @@ tests/                                    Vitest suites
 | `bot.ts` | Bots only know positions revealed in earlier rounds and output the same `Command`s as a human |
 | `settings.ts` | Mode presets, Custom limits and clamping, bot difficulty profiles, saved preferences |
 | `economy.ts`, `shop.ts`, `progress.ts`, `cosmetics.ts` | Pure Shell payouts, shop catalog and buy/equip logic, saved wallet and loadout, equipped items to render parameters |
-| `account.ts`, `cloud.ts`, `merge.ts` | Optional Supabase sign-in, lazy client, and pure merge/import rules between the local save and the cloud profile |
+| `account.ts`, `cloud.ts`, `merge.ts` | Optional Supabase sign-in, lazy client, server calls (matches, shop), and pure parse/import rules between the local save and the cloud profile |
+| `sync.ts`, `levels.ts` | Offline match queue with flush logic; pure XP and level rules |
 | `stats.ts` | Pure local stats: per-match records, streaks, per-mode results, safe load/save |
 | `touch.ts` | Floating dual virtual sticks built on Pointer Events |
 
@@ -169,7 +173,6 @@ tests/                                    Vitest suites
 Mobile support has been verified with emulated touch in a headless browser, not yet on real devices.
 
 ## Roadmap
-- Cloud economy: sync matches and purchases to accounts, level and XP
 - Leaderboards, achievements, ranks
 - Google and Discord login
 - Daily login rewards and challenges

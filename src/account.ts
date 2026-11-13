@@ -1,9 +1,11 @@
-/** Account session: sign up / in / out, profile fetch and the one-time guest import. */
+/** Account session: sign up / in / out, profile fetch, the one-time local import, and the cloud economy calls. */
 import { cloudEnabled, getClient } from './cloud';
 import { friendlyAuthError } from './accountValidate';
-import { buildImportPayload, parseCloudProfile } from './merge';
-import type { CloudProfile } from './merge';
+import { buildImportPayload, parseCloudProfile, parseSubmit } from './merge';
+import type { CloudProfile, MatchSummary } from './merge';
 import type { Progress } from './progress';
+import type { StatsData } from './stats';
+import type { SubmitOutcome } from './sync';
 
 export type AccountStatus = 'unavailable' | 'loading' | 'guest' | 'signedIn';
 
@@ -16,37 +18,29 @@ export interface AccountState {
 
 export type Result = { ok: true; message?: string } | { ok: false; error: string };
 
-const ACCOUNT_KEY = 'last-chamber-account';
+/** Result of a server-side buy / equip. `error` is a short code the UI turns into a message. */
+export type ShopOutcome =
+  | { ok: true; profile: CloudProfile }
+  | { ok: false; error: 'need_more' | 'unknown' | 'not_owned' | 'network'; missing?: number; profile?: CloudProfile };
 
-/** Which account the local save belongs to (so a later sign-in on the same device keeps local progress). */
-export function loadAccountMarker(): string {
-  try {
-    return localStorage.getItem(ACCOUNT_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-export function saveAccountMarker(userId: string): void {
-  try {
-    if (userId) localStorage.setItem(ACCOUNT_KEY, userId);
-    else localStorage.removeItem(ACCOUNT_KEY);
-  } catch {
-    /* storage unavailable */
-  }
-}
+const errText = (e: unknown): string => friendlyAuthError(e instanceof Error ? e.message : String(e));
 
 export class Account {
   state: AccountState = { status: cloudEnabled ? 'loading' : 'unavailable', email: '', userId: '', profile: null };
-  /** Called after the profile is loaded (sign-in or session restore). `sameAccount` is true on this device's own account. */
-  onProfile: (profile: CloudProfile, sameAccount: boolean) => void = () => undefined;
+  /** Called after the profile is loaded (sign-in or session restore). */
+  onProfile: (profile: CloudProfile) => void = () => undefined;
   /** Called when the session ends elsewhere (other tab) or by sign out. */
   onSignedOut: () => void = () => undefined;
   /** Called when the user arrives from a password-reset email. */
   onRecovery: () => void = () => undefined;
   /** Called on any state change so the UI can redraw. */
   onChange: () => void = () => undefined;
-  /** Supplies the current local progress for the one-time import. */
-  getLocal: () => Progress = () => {
+  /** Called as soon as the signed-in user id is known (before the profile loads). */
+  onUser: (userId: string) => void = () => undefined;
+  /** Awaited after sign-in so queued matches reach the server before the profile is fetched. */
+  beforeProfile: () => Promise<void> = () => Promise.resolve();
+  /** Supplies the current local save for the one-time import. */
+  getLocal: () => { progress: Progress; stats: StatsData } = () => {
     throw new Error('getLocal not set');
   };
 
@@ -68,28 +62,71 @@ export class Account {
         }
       });
       const { data } = await sb.auth.getSession();
-      if (data.session) await this.afterAuth(data.session.user.id, data.session.user.email ?? '');
-      else this.set({ status: 'guest' });
+      if (!data.session) {
+        this.set({ status: 'guest' });
+        return;
+      }
+      const { id, email } = { id: data.session.user.id, email: data.session.user.email ?? '' };
+      try {
+        await this.afterAuth(id, email);
+      } catch {
+        // A saved session exists but the server is unreachable (offline start): stay signed in without a profile,
+        // so matches still queue for this account, and load the profile once we are back online.
+        this.onUser(id);
+        this.set({ status: 'signedIn', email, userId: id, profile: null });
+        this.startRetry();
+      }
     } catch {
-      this.set({ status: 'guest' }); // offline or paused project: just play as a guest
+      this.set({ status: 'guest' }); // client could not even load: just play as a guest
+    }
+  }
+
+  private retry: ReturnType<typeof setInterval> | null = null;
+  private refreshing = false;
+
+  private startRetry(): void {
+    if (this.retry || typeof window === 'undefined') return;
+    this.retry = setInterval(() => void this.refresh(), 30_000);
+    window.addEventListener('online', () => void this.refresh());
+  }
+
+  /** Loads the profile for a session restored while offline. Safe to call any time; never throws. */
+  async refresh(): Promise<void> {
+    if (this.refreshing || this.state.status !== 'signedIn' || this.state.profile) {
+      if (this.state.profile && this.retry) {
+        clearInterval(this.retry);
+        this.retry = null;
+      }
+      return;
+    }
+    this.refreshing = true;
+    try {
+      await this.afterAuth(this.state.userId, this.state.email);
+      if (this.retry) clearInterval(this.retry);
+      this.retry = null;
+    } catch {
+      /* still offline: try again later */
+    } finally {
+      this.refreshing = false;
     }
   }
 
   private async afterAuth(userId: string, email: string): Promise<void> {
     const sb = await getClient();
+    this.onUser(userId);
+    await this.beforeProfile();
     let { data, error } = await sb.rpc('get_profile');
     if (error) throw error;
     let profile = parseCloudProfile(data);
     if (!profile) throw new Error('bad profile');
-    if (!profile.imported) {
-      ({ data, error } = await sb.rpc('import_local_progress', { payload: buildImportPayload(this.getLocal()) }));
+    if (!profile.reconciled) {
+      const local = this.getLocal();
+      ({ data, error } = await sb.rpc('import_local_progress', { payload: buildImportPayload(local.progress, local.stats) }));
       if (error) throw error;
       profile = parseCloudProfile(data) ?? profile;
     }
-    const same = loadAccountMarker() === userId;
     this.set({ status: 'signedIn', email, userId, profile });
-    this.onProfile(profile, same);
-    saveAccountMarker(userId);
+    this.onProfile(profile);
   }
 
   async signUp(email: string, password: string): Promise<Result> {
@@ -101,7 +138,7 @@ export class Account {
       await this.afterAuth(data.user.id, data.user.email ?? email);
       return { ok: true, message: 'Account created.' };
     } catch (e) {
-      return { ok: false, error: friendlyAuthError(e instanceof Error ? e.message : String(e)) };
+      return { ok: false, error: errText(e) };
     }
   }
 
@@ -113,7 +150,7 @@ export class Account {
       await this.afterAuth(data.user.id, data.user.email ?? email);
       return { ok: true, message: 'Signed in.' };
     } catch (e) {
-      return { ok: false, error: friendlyAuthError(e instanceof Error ? e.message : String(e)) };
+      return { ok: false, error: errText(e) };
     }
   }
 
@@ -125,7 +162,6 @@ export class Account {
       /* local session is cleared below regardless */
     }
     this.set({ status: 'guest', email: '', userId: '', profile: null });
-    saveAccountMarker('');
     this.onSignedOut();
   }
 
@@ -136,7 +172,7 @@ export class Account {
       if (error) return { ok: false, error: friendlyAuthError(error.message) };
       return { ok: true, message: 'If that email has an account, a reset link is on its way.' };
     } catch (e) {
-      return { ok: false, error: friendlyAuthError(e instanceof Error ? e.message : String(e)) };
+      return { ok: false, error: errText(e) };
     }
   }
 
@@ -147,7 +183,7 @@ export class Account {
       if (error) return { ok: false, error: friendlyAuthError(error.message) };
       return { ok: true, message: 'Password updated.' };
     } catch (e) {
-      return { ok: false, error: friendlyAuthError(e instanceof Error ? e.message : String(e)) };
+      return { ok: false, error: errText(e) };
     }
   }
 
@@ -161,7 +197,51 @@ export class Account {
       if (this.state.profile) this.set({ profile: { ...this.state.profile, displayName: name.trim() } });
       return { ok: true, message: 'Name updated.' };
     } catch (e) {
-      return { ok: false, error: friendlyAuthError(e instanceof Error ? e.message : String(e)) };
+      return { ok: false, error: errText(e) };
     }
+  }
+
+  // ---- cloud economy -----------------------------------------------------------------------
+
+  /** Sends one finished match. Any failure to reach the server (or an expired session) counts as 'network': retry later. */
+  async submitMatch(m: MatchSummary): Promise<SubmitOutcome> {
+    try {
+      const sb = await getClient();
+      const { data, error } = await sb.rpc('submit_match', { payload: m });
+      if (error) {
+        // Only a definite data/constraint rejection (SQLSTATE class 22 or 23) can never succeed. Everything else
+        // (offline, 5xx, expired session, a migration not applied yet) keeps the match queued for a later retry.
+        const code = String((error as { code?: unknown }).code ?? '');
+        return code.startsWith('22') || code.startsWith('23') ? { kind: 'invalid' } : { kind: 'network' };
+      }
+      if (data && typeof data === 'object' && (data as Record<string, unknown>).error === 'invalid') return { kind: 'invalid' };
+      const parsed = parseSubmit(data);
+      return parsed ? { kind: 'ok', data: parsed } : { kind: 'invalid' };
+    } catch {
+      return { kind: 'network' };
+    }
+  }
+
+  private async shopCall(fn: 'buy_item' | 'equip_item', id: string): Promise<ShopOutcome> {
+    try {
+      const sb = await getClient();
+      const { data, error } = await sb.rpc(fn, { item_id: id });
+      if (error) return { ok: false, error: 'network' };
+      const d = (data ?? {}) as Record<string, unknown>;
+      const profile = parseCloudProfile(d.profile) ?? undefined;
+      if (d.ok === true && profile) return { ok: true, profile };
+      const code = d.error === 'need_more' || d.error === 'not_owned' ? d.error : 'unknown';
+      return { ok: false, error: code, missing: typeof d.missing === 'number' ? d.missing : undefined, profile };
+    } catch {
+      return { ok: false, error: 'network' };
+    }
+  }
+
+  buyItem(id: string): Promise<ShopOutcome> {
+    return this.shopCall('buy_item', id);
+  }
+
+  equipItem(id: string): Promise<ShopOutcome> {
+    return this.shopCall('equip_item', id);
   }
 }

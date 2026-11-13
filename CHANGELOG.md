@@ -4,6 +4,17 @@ All notable changes to Last Chamber. This file is shown in-game on the Changelog
 Format per release: `## [version] - YYYY-MM-DD - short title`, then `### Added` / `### Changed` / `### Fixed` lists.
 To release: bump `version` in `package.json` and add an entry at the top.
 
+## [0.8.0] - 2026-11-13 - Cloud economy, XP and levels
+### Added
+- XP and levels: every match earns XP (more for wins, kills and surviving rounds). Levels 1 to 100, each level-up pays bonus Shells. Guests level up too and keep their level when they sign in
+- Level badge and XP bar on the player card, a level row on your Profile, and XP and "LEVEL UP!" lines on the game-over panel
+- Signed-in players: the server now works out every payout, so your account's Shells, items, loadout, stats and recent matches stay in sync across devices
+- Offline play: matches finished without a connection are queued and sent when you are back online (the card's dot turns amber while matches wait)
+### Changed
+- The Shop needs a connection while you are signed in (purchases are checked by the server); matches still play offline
+- Opening the game offline while signed in keeps you signed in and loads your profile once you are online
+- Implausible matches are rejected by the server, and payouts are capped at 60 matches per hour and 3000 Shells per day
+
 ## [0.7.1] - 2026-11-13 - Player card
 ### Added
 - Player card in the top-left corner of the main menu: your avatar with its rarity glow, name, title and Shells. Guests see "Guest - tap to sign in"; signed-in players get a green online dot

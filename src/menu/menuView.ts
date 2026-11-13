@@ -13,6 +13,7 @@ import { isNarrow, ui } from '../ui';
 import { APP_NAME, APP_TAGLINE, APP_VERSION } from '../version';
 import { View } from '../view';
 import { HOWTO_PAGES } from './menuModel';
+import { MAX_LEVEL, xpNeeded } from '../levels';
 import type { Progress } from '../progress';
 import type { ClickPart, MenuItem, MenuModel } from './menuModel';
 
@@ -577,6 +578,30 @@ export class MenuView {
     ctx.restore();
   }
 
+  private xpFraction(p: Progress): number {
+    return p.level >= MAX_LEVEL ? 1 : Math.min(1, p.xp / xpNeeded(p.level));
+  }
+
+  /** Thin rounded progress bar (track + glowing fill). */
+  private drawXpBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, frac: number): void {
+    this.rr(ctx, x, y, w, h, h / 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fill();
+    if (frac > 0) {
+      const fw = Math.max(h, w * frac);
+      ctx.save();
+      this.rr(ctx, x, y, fw, h, h / 2);
+      const g = ctx.createLinearGradient(x, 0, x + w, 0);
+      g.addColorStop(0, '#4cc9f0');
+      g.addColorStop(1, '#8be9ff');
+      ctx.fillStyle = g;
+      ctx.shadowColor = 'rgba(76, 201, 240, 0.7)';
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   /** Rarity-glowing round avatar of the equipped skin. Used by the Profile and the player card. */
   private drawAvatar(ctx: CanvasRenderingContext2D, ax: number, ay: number, av: number, p: Progress, now: number, u: number): void {
     const skinItem = itemById(p.equipped.skin);
@@ -633,16 +658,19 @@ export class MenuView {
     let avX: number;
     if (full) {
       av = 52 * u;
-      h = 68 * u;
+      h = 76 * u;
       const titleItem = itemById(p.equipped.title);
       const guestPrompt = model.accountAvailable && info.status === 'guest';
       const sub = guestPrompt ? 'GUEST - TAP TO SIGN IN' : (titleItem?.title ?? 'Rookie').toUpperCase();
       ctx.font = `900 ${Math.round(17 * u)}px ${FONT}`;
       const nameW = ctx.measureText(p.name).width;
+      ctx.font = `900 ${Math.round(11 * u)}px ${FONT}`;
+      const lvTxt = `LV ${p.level}`;
+      const lvW = ctx.measureText(lvTxt).width + 12 * u;
       ctx.font = `800 ${Math.round(11 * u)}px ${FONT}`;
       const subW = ctx.measureText(sub).width + sub.length * 1.5 * u;
       avX = x + 8 * u;
-      w = 8 * u + av + 12 * u + Math.max(nameW, subW, 90 * u) + 22 * u + 24 * u + shellsW + 14 * u;
+      w = 8 * u + av + 12 * u + Math.max(nameW + 8 * u + lvW, subW, 130 * u) + 22 * u + 24 * u + shellsW + 14 * u;
       this.rr(ctx, x, y, w, h, 16 * u);
       ctx.fillStyle = 'rgba(14, 18, 28, 0.9)';
       ctx.fill();
@@ -650,15 +678,24 @@ export class MenuView {
       ctx.strokeStyle = 'rgba(255,255,255,0.16)';
       ctx.stroke();
       const tx = avX + av + 12 * u;
-      this.text(ctx, p.name, tx, y + 28 * u, 900, 17 * u, C.text, 'left');
+      this.text(ctx, p.name, tx, y + 27 * u, 900, 17 * u, C.text, 'left');
+      // level pill
+      ctx.font = `900 ${Math.round(17 * u)}px ${FONT}`;
+      const px = tx + ctx.measureText(p.name).width + 8 * u;
+      this.rr(ctx, px, y + 13 * u, lvW, 18 * u, 9 * u);
+      ctx.fillStyle = 'rgba(76, 201, 240, 0.16)';
+      ctx.fill();
+      this.text(ctx, lvTxt, px + lvW / 2, y + 26 * u, 900, 11 * u, '#8be9ff', 'center');
       const titleR = RARITY[titleItem?.rarity ?? 'common'];
       ctx.save();
       if (!guestPrompt && titleR.rank > 0) {
         ctx.shadowColor = titleR.color;
         ctx.shadowBlur = titleR.glow * 0.5 * u;
       }
-      this.text(ctx, sub, tx, y + 48 * u, 800, 11 * u, guestPrompt ? C.hiddenAccent : titleR.rank > 0 ? titleR.color : C.textDim, 'left', 1.5 * u);
+      this.text(ctx, sub, tx, y + 46 * u, 800, 11 * u, guestPrompt ? C.hiddenAccent : titleR.rank > 0 ? titleR.color : C.textDim, 'left', 1.5 * u);
       ctx.restore();
+      const barW = w - (tx - x) - 22 * u - 24 * u - shellsW - 14 * u;
+      this.drawXpBar(ctx, tx, y + 56 * u, Math.max(60 * u, barW), 6 * u, this.xpFraction(p));
       this.shellIcon(ctx, x + w - 14 * u - shellsW - 12 * u, y + h / 2, 10 * u, now);
       this.text(ctx, shellsTxt, x + w - 14 * u, y + h / 2 + 5.5 * u, 900, 15 * u, '#ffd479', 'right');
     } else {
@@ -681,11 +718,24 @@ export class MenuView {
       this.text(ctx, shellsTxt, iconCx + 14 * u, y + h / 2 + 5.5 * u, 900, 15 * u, '#ffd479', 'left');
     }
     this.drawAvatar(ctx, avX, y + (h - av) / 2, av, p, now, u);
+    if (!full) {
+      const bx = avX + av * 0.16;
+      const by = y + (h - av) / 2 + av * 0.9;
+      ctx.font = `900 ${Math.round(9 * u)}px ${FONT}`;
+      const bw = Math.max(13 * u, ctx.measureText(String(p.level)).width + 8 * u);
+      this.rr(ctx, bx - bw / 2, by - 6.5 * u, bw, 13 * u, 6.5 * u);
+      ctx.fillStyle = '#0e1220';
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#4cc9f0';
+      ctx.stroke();
+      this.text(ctx, String(p.level), bx, by + 3.3 * u, 900, 9 * u, '#8be9ff', 'center');
+    }
     if (info.status === 'signedIn') {
       const r = Math.max(3.5 * u, av * 0.1);
       ctx.beginPath();
       ctx.arc(avX + av * 0.86, y + (h - av) / 2 + av * 0.86, r, 0, Math.PI * 2);
-      ctx.fillStyle = C.win;
+      ctx.fillStyle = (info.pending ?? 0) > 0 ? C.revealAccent : C.win; // amber while matches wait to sync
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = 'rgba(6, 8, 14, 0.95)';
@@ -1114,17 +1164,17 @@ export class MenuView {
       y += 28 * u + 12 * u;
     } else y += 6 * u;
 
-    // Level / achievements teaser (arrives in the next update)
-    this.rr(ctx, left, y, innerW, 40 * u, 10 * u);
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    // Level and XP
+    const need = xpNeeded(p.level);
+    this.rr(ctx, left, y, innerW, 58 * u, 12 * u);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 4]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    this.text(ctx, 'LEVEL, XP and ACHIEVEMENTS: coming soon', x + w / 2, y + 25 * u, 700, 12 * u, C.textDim, 'center', 1 * u);
-    y += 40 * u + 18 * u;
+    this.text(ctx, `LEVEL ${p.level}`, left + 14 * u, y + 27 * u, 900, 20 * u, C.text, 'left');
+    this.text(ctx, p.level >= MAX_LEVEL ? 'MAX LEVEL' : `${p.xp} / ${need} XP`, left + innerW - 14 * u, y + 25 * u, 700, 12 * u, '#6fd6ff', 'right');
+    this.drawXpBar(ctx, left + 14 * u, y + 38 * u, innerW - 28 * u, 8 * u, this.xpFraction(p));
+    y += 58 * u + 10 * u;
+    this.text(ctx, 'ACHIEVEMENTS: coming soon', x + w / 2, y + 8 * u, 700, 11 * u, C.textDim, 'center', 1 * u);
+    y += 16 * u + 14 * u;
 
     // Stat tiles
     const oc = ownedCount(p);

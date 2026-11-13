@@ -110,7 +110,7 @@ Goal: real player accounts so Shells, items, level and stats follow the player a
 
 **Phases (each gets its own plan before coding)**
 1. **Foundation (done in 0.7.0):** Supabase project, schema + RLS, auth (**email + password only**; guests stay local), profile row, display name, Account screen (sign up / sign in / sign out / password reset), guest-to-account merge
-2. **Cloud economy:** `submit_match`, buy / equip RPCs, cloud stats and match history, offline queue, XP and levels
+2. **Cloud economy (done in 0.8.0):** `submit_match`, buy / equip RPCs, cloud stats and match history, offline queue, XP and levels. XP per match = base payout before multipliers (`10 + win 20 / draw 8 + kills*8 + survived*2`); level n to n+1 needs `100 + 40n` XP, leaving level n pays `25 + 5n` Shells, cap level 100; limits 60 matches/hour and 3000 Shells/day
 3. **Public layer:** leaderboards, public player profile, match history screen, achievements and badges
 4. **Later:** Google and Discord login (deferred), ranks (rating + seasons), daily rewards and challenges, friends, then online multiplayer on the same accounts
 
@@ -127,4 +127,4 @@ Goal: real player accounts so Shells, items, level and stats follow the player a
 - Custom domain for the deployed game
 
 ## Done
-- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress, 0.6.0 Shells, shop and profile, 0.7.0 player accounts (email + password), 0.7.1 player card
+- 0.1.0 core prototype, 0.2.0 visuals and audio, 0.3.0 menu and modes, 0.4.0 mobile support, 0.5.0 stats and progress, 0.6.0 Shells, shop and profile, 0.7.0 player accounts (email + password), 0.7.1 player card, 0.8.0 cloud economy, XP and levels

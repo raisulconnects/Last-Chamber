@@ -38,13 +38,17 @@ export type MenuAction =
   | { type: 'saveProgress' }
   | { type: 'rename' }
   | { type: 'openForm'; mode: 'signIn' | 'signUp' }
-  | { type: 'signOut' };
+  | { type: 'signOut' }
+  | { type: 'buy'; id: string }
+  | { type: 'equip'; id: string };
 
 /** What the Account screen shows; owned and updated by the app. */
 export interface AccountInfo {
   status: 'unavailable' | 'loading' | 'guest' | 'signedIn';
   email: string;
   level: number;
+  /** Matches waiting to be sent to the server (the card shows an amber dot while > 0). */
+  pending?: number;
 }
 
 export interface MenuItem {
@@ -259,6 +263,15 @@ export class MenuModel {
     if (isEquipped(p, id)) {
       this.say(`${item.name} is already equipped`, 'info');
       return null;
+    }
+    if (this.accountInfo.status === 'signedIn') {
+      // The server is the shop authority for accounts: ask it instead of changing the wallet here.
+      if (isOwned(p, id)) return { type: 'equip', id };
+      if (p.shells < item.price) {
+        this.say(`Need ${item.price - p.shells} more Shells`, 'bad');
+        return null;
+      }
+      return { type: 'buy', id };
     }
     const r = buyOrEquip(p, id);
     if (r.kind === 'needMore') {

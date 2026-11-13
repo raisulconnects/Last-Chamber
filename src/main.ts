@@ -6,22 +6,27 @@ import { BotBrain } from './bot';
 import { CONFIG } from './config';
 import { loadoutOf } from './cosmetics';
 import { cloudEnabled } from './cloud';
-import { calcPayout } from './economy';
+import { calcPayout, calcXp } from './economy';
+import { applyXp } from './levels';
 import { GameEventDetector } from './events';
 import { Input } from './input';
 import { Match } from './match';
-import { applyCloudProfile } from './merge';
+import { applyCloudProfile, applyCloudStats } from './merge';
+import type { CloudProfile, MatchSummary } from './merge';
 import { MenuModel } from './menu/menuModel';
 import type { MenuAction, MenuEnv } from './menu/menuModel';
 import { Renderer } from './render';
 import { addShells, emptyProgress, loadProgress, sanitizeName, saveProgress } from './progress';
 import { DIFFICULTY, loadPrefs, savePrefs } from './settings';
-import { nextUnlock } from './shop';
+import { itemById, nextUnlock } from './shop';
 import { emptyStats, loadStats, recordMatch, saveStats } from './stats';
+import type { MatchRecord } from './stats';
+import { SyncManager } from './sync';
 import { THEME } from './theme';
 import { ui } from './ui';
 import type { MatchSettings } from './settings';
 import type { Command } from './types';
+import { APP_VERSION } from './version';
 import { View } from './view';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -62,6 +67,7 @@ renderer.loadout = loadoutOf(menu.progress);
 
 // ---- accounts (only active when the build has Supabase settings) ------------------------------
 const account = new Account();
+const sync = new SyncManager((m) => account.submitMatch(m));
 menu.accountAvailable = cloudEnabled;
 const accountForm = new AccountForm(account, {
   onDone: (message) => {
@@ -75,24 +81,93 @@ const accountForm = new AccountForm(account, {
   onClose: () => canvas.focus(),
 });
 function syncAccountUi(): void {
-  menu.accountInfo = { status: account.state.status, email: account.state.email, level: account.state.profile?.level ?? 1 };
+  menu.accountInfo = {
+    status: account.state.status,
+    email: account.state.email,
+    level: menu.progress.level,
+    pending: sync.pending,
+  };
   renderer.signInHint = cloudEnabled && account.state.status === 'guest';
 }
-account.getLocal = () => menu.progress;
-account.onChange = syncAccountUi;
-account.onProfile = (cloud, sameAccount) => {
-  menu.progress = applyCloudProfile(menu.progress, cloud, sameAccount);
+/** The server's profile (Shells, items, loadout, XP, stats, recent matches) replaces the local copy. */
+function applyCloud(cloud: CloudProfile): void {
+  menu.progress = applyCloudProfile(cloud);
   saveProgress(menu.progress);
+  stats = applyCloudStats(cloud);
+  menu.stats = stats;
+  saveStats(stats);
   renderer.loadout = loadoutOf(menu.progress);
+  syncAccountUi();
+}
+account.getLocal = () => ({ progress: menu.progress, stats });
+account.onChange = syncAccountUi;
+account.onUser = (uid) => sync.setUser(uid);
+account.beforeProfile = () => sync.flush();
+account.onProfile = (cloud) => {
+  if (sync.pending === 0) applyCloud(cloud); // otherwise keep the newer local state until the queue drains
 };
 account.onSignedOut = () => {
-  menu.progress = emptyProgress(); // the account's data lives in the cloud; this device starts a fresh guest save
+  // The account's data lives in the cloud; this device starts a fresh guest save.
+  sync.clear();
+  menu.progress = emptyProgress();
   saveProgress(menu.progress);
+  stats = emptyStats();
+  menu.stats = stats;
+  saveStats(stats);
   renderer.loadout = loadoutOf(menu.progress);
+  syncAccountUi();
 };
+sync.onSynced = (data) => applyCloud(data.profile);
+sync.onChange = syncAccountUi;
 account.onRecovery = () => accountForm.open('newPassword');
 syncAccountUi();
 void account.init();
+
+async function signOutNow(): Promise<void> {
+  // Best effort: let queued matches reach the server first (give up after 3 s when offline).
+  await Promise.race([sync.flush(), new Promise<void>((res) => setTimeout(res, 3000))]);
+  await account.signOut();
+  menu.notify('Signed out', 'info');
+}
+
+let shopBusy = false;
+/** Buy / equip while signed in: the server checks the price and ownership, then its profile replaces ours. */
+async function serverShop(kind: 'buy' | 'equip', id: string): Promise<void> {
+  if (shopBusy) return;
+  shopBusy = true;
+  try {
+    const item = itemById(id);
+    menu.notify('Working...', 'info');
+    await sync.flush(); // the server must know about finished matches before it prices anything
+    if (sync.pending > 0) {
+      menu.notify('Go online to use the shop', 'bad');
+      return;
+    }
+    const r = kind === 'buy' ? await account.buyItem(id) : await account.equipItem(id);
+    if (r.ok) {
+      applyCloud(r.profile);
+      menu.notify(kind === 'buy' ? `Bought and equipped ${item?.name ?? 'item'}` : `Equipped ${item?.name ?? 'item'}`, 'good');
+    } else {
+      if (r.profile) applyCloud(r.profile);
+      menu.notify(
+        r.error === 'need_more' ? `Need ${r.missing ?? 'more'} more Shells` : r.error === 'network' ? 'Go online to use the shop' : 'That did not work. Try again.',
+        'bad',
+      );
+    }
+  } finally {
+    shopBusy = false;
+  }
+}
+
+function newMatchId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch {
+    /* fall through */
+  }
+  const h = (n: number): string => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+  return `${h(8)}-${h(4)}-4${h(3)}-a${h(3)}-${h(12)}`;
+}
 
 // Per-match tally for the human player, recorded once when the match ends.
 let currentMode = 'Classic';
@@ -160,7 +235,7 @@ function recordFinishedMatch(): void {
   if (!o) return;
   const result = o.kind === 'draw' ? 'draw' : o.winnerId === match.humanId ? 'win' : 'loss';
   const survived = tally.diedRound > 0 ? tally.diedRound - 1 : match.round; // rounds lived through
-  const r = recordMatch(stats, {
+  const rec: MatchRecord = {
     mode: currentMode,
     bots: match.settings.botCount,
     difficulty: match.settings.botDifficulty,
@@ -169,7 +244,8 @@ function recordFinishedMatch(): void {
     survived,
     kills: tally.kills,
     at: Date.now(),
-  });
+  };
+  const r = recordMatch(stats, rec);
   stats = r.stats;
   menu.stats = stats;
   saveStats(stats);
@@ -179,19 +255,31 @@ function recordFinishedMatch(): void {
   if (r.newBestSurvived && stats.played > 1) notes.push('New best survival!');
   renderer.gameOverNote = notes.length ? notes.join('  -  ') : null;
 
-  // Pay out Shells once for this finished match.
-  const pay = calcPayout({ mode: currentMode, bots: match.settings.botCount, difficulty: match.settings.botDifficulty, result, rounds: match.round, survived, kills: tally.kills });
-  const wallet = addShells(menu.progress, pay.total);
+  // Shells and XP, computed here for instant feedback. For guests this is final; for signed-in players the
+  // server recomputes the same numbers (and its profile replaces ours once the match has been delivered).
+  const payIn = { mode: currentMode, bots: match.settings.botCount, difficulty: match.settings.botDifficulty, result, rounds: match.round, survived, kills: tally.kills } as const;
+  const pay = calcPayout(payIn);
+  const xpGain = calcXp(payIn);
+  const lv = applyXp(menu.progress.level, menu.progress.xp, xpGain);
+  const wallet = { ...addShells(menu.progress, pay.total + lv.bonusShells), level: lv.level, xp: lv.xp };
   menu.progress = wallet;
   saveProgress(wallet);
+  if (account.state.status === 'signedIn') {
+    const summary: MatchSummary = { id: newMatchId(), ...rec, v: APP_VERSION };
+    sync.push(summary);
+  }
   const nu = nextUnlock(wallet);
   renderer.reward = {
     earned: pay.total,
     parts: pay.parts,
     balance: wallet.shells,
     next: nu ? (nu.missing > 0 ? `${nu.missing} Shells to ${nu.item.name}` : `You can afford ${nu.item.name}!`) : null,
+    xp: xpGain,
+    level: lv.level,
+    levelUps: lv.levelUps,
     at: performance.now() / 1000,
   };
+  syncAccountUi();
 }
 
 // ---- audio controls (DOM) + menu settings sync -----------------------------------------------
@@ -242,7 +330,11 @@ function applyMenuAction(a: MenuAction | null): void {
       accountForm.open(a.mode);
       break;
     case 'signOut':
-      void account.signOut().then(() => menu.notify('Signed out', 'info'));
+      void signOutNow();
+      break;
+    case 'buy':
+    case 'equip':
+      void serverShop(a.type, a.id);
       break;
     case 'rename': {
       if (account.state.status === 'signedIn') {

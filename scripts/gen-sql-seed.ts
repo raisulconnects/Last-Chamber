@@ -1,22 +1,17 @@
-/** Regenerates the shop_items block in supabase/migrations/0001_foundation.sql from src/shop.ts.
+/** Regenerates the generated SQL blocks (shop catalog in 0001, economy constants in 0002).
  *  Run with: npm run gen:sql */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { CATALOG } from '../src/shop';
+import { economySql, shopSeedSql } from './sqlblocks';
 
-const FILE = 'supabase/migrations/0001_foundation.sql';
-const BEGIN = '-- BEGIN GENERATED SHOP ITEMS';
-const END = '-- END GENERATED SHOP ITEMS';
-
-export function shopSeedSql(): string {
-  const rows = CATALOG.map((i) => `  ('${i.id}', '${i.category}', '${i.rarity}', ${i.price})`).join(',\n');
-  return `insert into public.shop_items (id, category, rarity, price) values\n${rows}\non conflict (id) do update set category = excluded.category, rarity = excluded.rarity, price = excluded.price;`;
+function patch(file: string, begin: string, end: string, body: string): void {
+  const sql = readFileSync(file, 'utf8');
+  const a = sql.indexOf(begin);
+  const b = sql.indexOf(end);
+  if (a < 0 || b < 0) throw new Error(`markers not found in ${file}`);
+  const eol = sql.includes('\r\n') ? '\r\n' : '\n';
+  writeFileSync(file, sql.slice(0, a) + `${begin}${eol}${body.replace(/\n/g, eol)}${eol}` + sql.slice(b));
+  console.log(`updated ${file}`);
 }
 
-const sql = readFileSync(FILE, 'utf8');
-const a = sql.indexOf(BEGIN);
-const b = sql.indexOf(END);
-if (a < 0 || b < 0) throw new Error('markers not found in ' + FILE);
-const eol = sql.includes('\r\n') ? '\r\n' : '\n';
-const block = `${BEGIN}${eol}${shopSeedSql().replace(/\n/g, eol)}${eol}`;
-writeFileSync(FILE, sql.slice(0, a) + block + sql.slice(b));
-console.log(`wrote ${CATALOG.length} items to ${FILE}`);
+patch('supabase/migrations/0001_foundation.sql', '-- BEGIN GENERATED SHOP ITEMS', '-- END GENERATED SHOP ITEMS', shopSeedSql());
+patch('supabase/migrations/0002_cloud_economy.sql', '-- BEGIN GENERATED ECONOMY', '-- END GENERATED ECONOMY', economySql());

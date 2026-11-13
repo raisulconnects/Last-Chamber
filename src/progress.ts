@@ -1,6 +1,7 @@
 /** Player progress (wallet, inventory, loadout, profile). Pure logic plus try/catch localStorage. */
 import { CATEGORIES, CATALOG, freeItemOf, itemById } from './shop';
 import type { Category } from './shop';
+import { MAX_LEVEL, xpNeeded } from './levels';
 
 export type Equipped = Record<Category, string>;
 
@@ -12,6 +13,8 @@ export interface Progress {
   owned: string[];
   equipped: Equipped;
   createdAt: number; // epoch ms
+  level: number; // 1..MAX_LEVEL
+  xp: number; // XP inside the current level
 }
 
 export const PROGRESS_KEY = 'last-chamber-progress';
@@ -33,6 +36,8 @@ export function emptyProgress(now = Date.now()): Progress {
     owned: CATALOG.filter((i) => i.free).map((i) => i.id),
     equipped: defaultEquipped(),
     createdAt: now,
+    level: 1,
+    xp: 0,
   };
 }
 
@@ -61,6 +66,8 @@ export function sanitizeProgress(raw: unknown): Progress {
   out.shells = num(r.shells);
   out.totalEarned = Math.max(num(r.totalEarned), 0);
   out.createdAt = num(r.createdAt) || out.createdAt;
+  out.level = Math.min(MAX_LEVEL, Math.max(1, num(r.level) || 1));
+  out.xp = out.level >= MAX_LEVEL ? 0 : Math.min(xpNeeded(out.level) - 1, num(r.xp));
   const owned = new Set(out.owned);
   if (Array.isArray(r.owned)) for (const id of r.owned) if (typeof id === 'string' && itemById(id)) owned.add(id);
   out.owned = [...owned];
